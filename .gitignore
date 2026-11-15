@@ -1,0 +1,38 @@
+# private working files
+ONCALLGYM_SPEC.md
+CLAUDE.md
+.claude/
+.notes/
+.env
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# runtime
+runs/
+episodes/
+*.log
+*.db
+*.db-wal
+*.db-shm
+
+# results: keep small summaries and plots only
+results/raw/
+results/**/*.jsonl
+
+# models
+*.safetensors
+*.bin
+*.gguf
+checkpoints/
+outputs/
+
+# os
+.DS_Store
