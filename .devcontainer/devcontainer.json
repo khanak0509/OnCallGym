@@ -1,0 +1,10 @@
+{
+  "name": "oncallgym",
+  "build": { "dockerfile": "Dockerfile" },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "runArgs": ["--memory=6g", "--pids-limit=2048", "--cpus=6"],
+  "containerEnv": { "UV_PROJECT_ENVIRONMENT": "/opt/venv" },
+  "postCreateCommand": "uv sync",
+  "customizations": { "vscode": { "extensions": ["ms-python.python", "charliermarsh.ruff"] } }
+}
