@@ -1,0 +1,25 @@
+[project]
+name = "oncallgym"
+version = "0.1.0"
+description = "RL environment where an agent works as on-call engineer for a simulated microservice backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "verifiers==0.4.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
