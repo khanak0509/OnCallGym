@@ -29,6 +29,11 @@ PY = "3.12"
 
 # replaced by build.py with the contents of grpo_probe.py
 PROBE_SRC = None
+# "full": every stage for both models. "caps4b": 4B only, GRPO at 8k, then 7k, then 6k context.
+PLAN = "full"
+CAPS = [8192, 7168, 6144]
+PEAK_LIMIT_GB = 14.0
+STEP_LIMIT_S = 300.0
 
 summary: dict = {"started": time.strftime("%Y-%m-%d %H:%M:%S"), "stages": {}}
 
@@ -230,12 +235,96 @@ def stage_model(model: str, probe: Path):
     summary["stages"][f"model_{tag}"] = res
 
 
+def judge_cap(result_file: Path, cap: int) -> dict:
+    """Pass if training ran, peak reserved memory and every step time are under the limits,
+    and rollouts actually reached the cap (some were clipped at it)."""
+    if not result_file.exists():
+        return {"cap": cap, "passed": False, "reason": "no result file (process crashed)"}
+    r = json.loads(result_file.read_text())
+    if not r.get("ok"):
+        oom = "OutOfMemory" in r.get("error", "") or "out of memory" in r.get("error", "")
+        return {
+            "cap": cap,
+            "passed": False,
+            "reason": "OOM" if oom else "error",
+            "error": r.get("error", "")[-600:],
+        }
+    steps = r["steps"]
+    peak = max(st["peak_reserved_gb_gpu0"] for st in steps)
+    slowest = max(st["seconds"] for st in steps)
+    clipped = [st.get("logs", {}).get("completions/clipped_ratio", 0) for st in steps]
+    tool_max = max((ro["tool_tokens"] for st in steps for ro in st["rollouts"]), default=0)
+    reached = max(clipped) > 0 or r["prompt_tokens"] + tool_max >= 0.85 * cap
+    passed = (
+        peak < PEAK_LIMIT_GB and slowest < STEP_LIMIT_S and reached and not r["nonfinite_steps"]
+    )
+    return {
+        "cap": cap,
+        "passed": passed,
+        "peak_reserved_gb": peak,
+        "slowest_step_s": slowest,
+        "step_seconds": [st["seconds"] for st in steps],
+        "clipped_ratio": clipped,
+        "max_tool_tokens": tool_max,
+        "prompt_tokens": r["prompt_tokens"],
+        "reached_cap": reached,
+        "nonfinite_steps": r["nonfinite_steps"],
+    }
+
+
+def run_caps_4b(probe: Path):
+    model = MODELS[0]
+    py = VENVS / "train/bin/python"
+    gpu0 = {"CUDA_VISIBLE_DEVICES": "0", "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+    proc, log = start_vllm(model, eager=False)
+    t0 = time.time()
+    if not wait_health(8000, proc):
+        stop(proc)
+        summary["stages"]["caps_4b"] = {"vllm_failed": tail_of(log, 30)}
+        return
+    results = []
+    summary["stages"]["caps_4b"] = {"vllm_startup_s": round(time.time() - t0, 1), "runs": results}
+    decision = None
+    for cap in CAPS:
+        tool_tokens = (cap - 1000) // 5
+        cmd = (
+            f"{py} {probe} grpo --model {model} --out {OUT} --steps 3 --max-len {cap} "
+            f"--tool-tokens {tool_tokens} --tag cap{cap}"
+        )
+        code, secs, tail = sh(cmd, f"grpo_cap{cap}.log", env=gpu0, timeout=3600)
+        verdict = judge_cap(OUT / f"grpo_{model.split('/')[-1]}_cap{cap}.json", cap)
+        verdict.update({"exit_code": code, "wall_s": secs, "tool_tokens_per_call": tool_tokens})
+        results.append(verdict)
+        save()
+        if verdict["passed"]:
+            decision = f"4B with {cap} context cap"
+            break
+    stop(proc)
+    if decision is None:
+        decision = "1.7B (4B did not pass at 6k)"
+    summary["decision"] = decision
+    summary["vllm_log_tail"] = tail_of(log, 15)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     LOGS.mkdir(exist_ok=True)
     VENVS.mkdir(parents=True, exist_ok=True)
     probe = OUT / "grpo_probe.py"
     probe.write_text(PROBE_SRC)
+
+    summary["plan"] = PLAN
+    if PLAN == "caps4b":
+        for fn in (stage_env, stage_uv):
+            fn()
+        if stage_train_stack():
+            save()
+            run_caps_4b(probe)
+        summary["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        save()
+        shutil.rmtree(OUT / "grpo_tmp", ignore_errors=True)
+        print(json.dumps(summary, indent=2, default=str)[:20000])
+        return
 
     for fn in (stage_env, stage_uv, stage_verifiers):
         fn()

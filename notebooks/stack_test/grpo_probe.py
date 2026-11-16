@@ -51,6 +51,20 @@ def fake_logs(service: str, seed: int, lines: int = 16) -> str:
 # rollout. TRL's completion-length metrics exclude tool tokens, so we count them ourselves.
 TOKENIZER = None
 ROLLOUTS: list[dict] = []
+# If > 0, logs() and metrics() outputs are padded to about this many tokens, so a handful of
+# calls fills the context window (used to test the trainer at a given context cap).
+TOOL_TOKENS = 0
+
+
+def pad_to(text: str, target: int, make_line) -> str:
+    if target <= 0 or TOKENIZER is None:
+        return text
+    lines = [text]
+    i = 0
+    while len(TOKENIZER("\n".join(lines))["input_ids"]) < target:
+        lines.append(make_line(i))
+        i += 1
+    return "\n".join(lines)
 
 
 class ProbeEnv:
@@ -94,7 +108,18 @@ class ProbeEnv:
         """
         if service not in SERVICES:
             return f"error: unknown service {service!r}"
-        return self._count(fake_logs(service, self.seed))
+        rng = random.Random(f"pad-{service}-{self.seed}")
+        text = pad_to(
+            fake_logs(service, self.seed),
+            TOOL_TOKENS,
+            lambda i: rng.choice(LOG_TEMPLATES).format(
+                ts=f"2026-11-16T09:{i // 60 % 60:02d}:{i % 60:02d}.000Z",
+                svc=service,
+                rid=f"{rng.getrandbits(48):012x}",
+                ms=rng.randint(3, 900),
+            ),
+        )
+        return self._count(text)
 
     def metrics(self, service: str) -> str:
         """Show current metrics of a service.
@@ -109,16 +134,23 @@ class ProbeEnv:
             return f"error: unknown service {service!r}"
         rng = random.Random(f"m-{service}-{self.seed}")
         err = 0.42 if service in (ROOT_CAUSE, "orders") else rng.random() * 0.01
-        return self._count(
-            json.dumps(
-                {
-                    "service": service,
-                    "error_rate": round(err, 3),
-                    "p95_ms": rng.randint(20, 9000 if service == ROOT_CAUSE else 300),
-                    "rps": rng.randint(5, 80),
-                }
-            )
+        text = json.dumps(
+            {
+                "service": service,
+                "error_rate": round(err, 3),
+                "p95_ms": rng.randint(20, 9000 if service == ROOT_CAUSE else 300),
+                "rps": rng.randint(5, 80),
+            }
         )
+        text = pad_to(
+            text + "\nper-minute history:",
+            TOOL_TOKENS,
+            lambda i: (
+                f"10:{i % 60:02d} err={rng.random() * err:.3f} "
+                f"p95_ms={rng.randint(20, 400)} rps={rng.randint(5, 80)}"
+            ),
+        )
+        return self._count(text)
 
     def submit_diagnosis(self, component: str, category: str) -> str:
         """Submit the final diagnosis. Ends the investigation; call it exactly once.
@@ -161,8 +193,9 @@ def run_grpo(args) -> dict:
     from transformers import AutoTokenizer, TrainerCallback
     from trl import GRPOConfig, GRPOTrainer
 
-    global TOKENIZER
+    global TOKENIZER, TOOL_TOKENS
     TOKENIZER = AutoTokenizer.from_pretrained(args.model)
+    TOOL_TOKENS = args.tool_tokens
     probe_env = ProbeEnv()
     names = ("list_services", "logs", "metrics", "submit_diagnosis")
     tools = [getattr(probe_env, n) for n in names]
@@ -190,6 +223,7 @@ def run_grpo(args) -> dict:
                     "step": state.global_step,
                     "seconds": round(time.time() - self.t0, 1),
                     "peak_gb_gpu0": round(torch.cuda.max_memory_allocated() / 2**30, 2),
+                    "peak_reserved_gb_gpu0": round(torch.cuda.max_memory_reserved() / 2**30, 2),
                     "rollouts": ROLLOUTS[seen[0] :],
                 }
             )
@@ -208,7 +242,8 @@ def run_grpo(args) -> dict:
         per_device_train_batch_size=args.batch,
         gradient_accumulation_steps=args.grad_accum,
         num_generations=args.generations,
-        max_completion_length=args.max_len - 1024,
+        # prompt + completion (model turns and tool results) must stay within the context cap
+        max_completion_length=args.max_len - prompt_tokens - 16,
         max_tool_calling_iterations=args.max_turns,
         learning_rate=1e-5,
         fp16=True,
@@ -314,6 +349,8 @@ def main():
     p.add_argument("--grad-accum", type=int, default=8)
     p.add_argument("--generations", type=int, default=8)
     p.add_argument("--vllm-port", type=int, default=8000)
+    p.add_argument("--tool-tokens", type=int, default=0)
+    p.add_argument("--tag", default="")
     args = p.parse_args()
 
     result = {
@@ -330,7 +367,7 @@ def main():
 
         result["ok"] = False
         result["error"] = traceback.format_exc()[-3000:]
-    tag = args.model.split("/")[-1]
+    tag = args.model.split("/")[-1] + (f"_{args.tag}" if args.tag else "")
     with open(os.path.join(args.out, f"{args.mode}_{tag}.json"), "w") as f:
         json.dump(result, f, indent=2, default=str)
     print(json.dumps({k: v for k, v in result.items() if k != "steps"}, default=str)[:2000])
