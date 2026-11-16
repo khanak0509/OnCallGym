@@ -34,7 +34,7 @@ FAULT_LINES = [
 ]
 
 
-def fake_logs(service: str, seed: int, lines: int = 14) -> str:
+def fake_logs(service: str, seed: int, lines: int = 16) -> str:
     rng = random.Random(f"{service}-{seed}")
     out = []
     for i in range(lines):
@@ -47,17 +47,33 @@ def fake_logs(service: str, seed: int, lines: int = 14) -> str:
     return "\n".join(out)
 
 
+# Filled by run_grpo: tokenizer for counting tool-output tokens, and one record per finished
+# rollout. TRL's completion-length metrics exclude tool tokens, so we count them ourselves.
+TOKENIZER = None
+ROLLOUTS: list[dict] = []
+
+
 class ProbeEnv:
     """Synthetic on-call environment exposing tools to TRL's environment_factory."""
 
     def __init__(self):
         self.seed = 0
         self.submitted = None
+        self.tool_tokens = 0
+        self.calls = 0
 
     def reset(self, **kwargs) -> str | None:
         self.seed = int(kwargs.get("seed", 0))
         self.submitted = None
+        self.tool_tokens = 0
+        self.calls = 0
         return None
+
+    def _count(self, text: str) -> str:
+        self.calls += 1
+        if TOKENIZER is not None:
+            self.tool_tokens += len(TOKENIZER(text)["input_ids"])
+        return text
 
     def list_services(self) -> str:
         """List all services with their status.
@@ -65,7 +81,7 @@ class ProbeEnv:
         Returns:
             One line per service with status and restart count.
         """
-        return "\n".join(f"{s} status=running restarts=0 ready=true" for s in SERVICES)
+        return self._count("\n".join(f"{s} status=running restarts=0 ready=true" for s in SERVICES))
 
     def logs(self, service: str) -> str:
         """Show the most recent log lines of a service.
@@ -78,7 +94,7 @@ class ProbeEnv:
         """
         if service not in SERVICES:
             return f"error: unknown service {service!r}"
-        return fake_logs(service, self.seed)
+        return self._count(fake_logs(service, self.seed))
 
     def metrics(self, service: str) -> str:
         """Show current metrics of a service.
@@ -93,13 +109,15 @@ class ProbeEnv:
             return f"error: unknown service {service!r}"
         rng = random.Random(f"m-{service}-{self.seed}")
         err = 0.42 if service in (ROOT_CAUSE, "orders") else rng.random() * 0.01
-        return json.dumps(
-            {
-                "service": service,
-                "error_rate": round(err, 3),
-                "p95_ms": rng.randint(20, 9000 if service == ROOT_CAUSE else 300),
-                "rps": rng.randint(5, 80),
-            }
+        return self._count(
+            json.dumps(
+                {
+                    "service": service,
+                    "error_rate": round(err, 3),
+                    "p95_ms": rng.randint(20, 9000 if service == ROOT_CAUSE else 300),
+                    "rps": rng.randint(5, 80),
+                }
+            )
         )
 
     def submit_diagnosis(self, component: str, category: str) -> str:
@@ -117,6 +135,7 @@ class ProbeEnv:
         return "Diagnosis recorded. The episode is over; do not call more tools."
 
     def get_reward(self) -> float:
+        ROLLOUTS.append({"tool_tokens": self.tool_tokens, "tool_calls": self.calls})
         if self.submitted is None:
             return 0.0
         return 1.0 if self.submitted[0] == ROOT_CAUSE else 0.1
@@ -124,8 +143,8 @@ class ProbeEnv:
 
 PROMPT = (
     "You are the on-call engineer. Users report that checkout fails with 502 errors. "
-    "Investigate with the tools: check the logs and metrics of several services before deciding. "
-    "When you are confident, call submit_diagnosis once."
+    "Investigate with the tools. Before deciding, read the logs AND the metrics of every service "
+    "listed by list_services, one tool call at a time. Only then call submit_diagnosis once."
 )
 
 
@@ -139,10 +158,26 @@ def model_kwargs(name: str) -> dict:
 def run_grpo(args) -> dict:
     from datasets import Dataset
     from peft import LoraConfig
-    from transformers import TrainerCallback
+    from transformers import AutoTokenizer, TrainerCallback
     from trl import GRPOConfig, GRPOTrainer
 
+    global TOKENIZER
+    TOKENIZER = AutoTokenizer.from_pretrained(args.model)
+    probe_env = ProbeEnv()
+    names = ("list_services", "logs", "metrics", "submit_diagnosis")
+    tools = [getattr(probe_env, n) for n in names]
+    prompt_tokens = len(
+        TOKENIZER.apply_chat_template(
+            [{"role": "user", "content": PROMPT}],
+            tools=tools,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            **model_kwargs(args.model).get("chat_template_kwargs", {}),
+        )["input_ids"]
+    )
     records = []
+    seen = [0]
 
     class StepTimer(TrainerCallback):
         def on_step_begin(self, a, state, control, **kw):
@@ -155,8 +190,10 @@ def run_grpo(args) -> dict:
                     "step": state.global_step,
                     "seconds": round(time.time() - self.t0, 1),
                     "peak_gb_gpu0": round(torch.cuda.max_memory_allocated() / 2**30, 2),
+                    "rollouts": ROLLOUTS[seen[0] :],
                 }
             )
+            seen[0] = len(ROLLOUTS)
 
         def on_log(self, a, state, control, logs=None, **kw):
             if logs and records:
@@ -210,6 +247,7 @@ def run_grpo(args) -> dict:
     return {
         "mode": "grpo",
         "total_seconds": round(total, 1),
+        "prompt_tokens": prompt_tokens,
         "steps": records,
         "nonfinite_steps": unstable,
     }
@@ -222,6 +260,7 @@ def run_memory(args) -> dict:
     model = AutoModelForCausalLM.from_pretrained(
         args.model, dtype=torch.float16, device_map={"": 0}
     )
+    model.train()  # HF only applies gradient checkpointing in training mode
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
     model = get_peft_model(
@@ -269,7 +308,7 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--max-len", type=int, default=8192)
-    p.add_argument("--max-turns", type=int, default=12)
+    p.add_argument("--max-turns", type=int, default=20)
     p.add_argument("--steps", type=int, default=4)
     p.add_argument("--batch", type=int, default=1)
     p.add_argument("--grad-accum", type=int, default=8)

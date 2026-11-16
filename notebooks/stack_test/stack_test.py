@@ -163,7 +163,7 @@ def start_vllm(model: str, eager: bool) -> tuple[subprocess.Popen, Path]:
         "--max_model_len",
         "8192",
         "--gpu_memory_utilization",
-        "0.85",
+        "0.75",
         "--port",
         "8000",
     ]
