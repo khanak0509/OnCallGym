@@ -20,12 +20,31 @@ EXPECTED_QUEUES = {
     "order.shipped": ["notify.events"],
 }
 
-THRESHOLDS = {"error_rate": 0.02, "p95_ms": 1500.0, "journey_timeout_s": 15.0}
+# invariants that describe the system catching up (part of Recovery); all others are
+# safety invariants (part of the integrity gate)
+LIVENESS_INVARIANTS = {
+    "paid_orders_fulfilled_or_refunded",
+    "charged_failed_orders_refunded",
+    "events_delivered",
+    "customers_notified",
+    "shipped_orders_stock_committed",
+}
+
+THRESHOLDS = {
+    "error_rate": 0.02,
+    "p95_ms": 1500.0,
+    "journey_timeout_s": 15.0,
+    "checkout_timeout_s": 10.0,
+}
 
 
 def _ro(path):
-    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+    """Read-only connection holding one read transaction (a consistent snapshot) from its
+    first query until it is closed."""
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5, isolation_level=None)
     c.row_factory = sqlite3.Row
+    c.execute("BEGIN")
+    c.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
     return c
 
 
@@ -161,11 +180,16 @@ class Probe:
         res["ok"] = True
         return res
 
-    def recovery_window(self, seconds: float = 10.0, interval: float = 1.0) -> dict:
-        """Every interval: all services ready (supervisor view) and a browse request through
-        the edge. Pass if never not-ready, error rate and p95 under thresholds."""
+    def recovery_window(self, seconds: float = 10.0, interval: float = 0.5) -> dict:
+        """For `seconds`: all services ready (supervisor view), reads through the edge
+        (catalog list, product, search) and a login + checkout every few ticks.
+        Pass if never not-ready, read error rate and p95 under thresholds, and every
+        checkout succeeded within the checkout timeout."""
         lat, errors, total, not_ready = [], 0, 0, {}
+        checkouts = {"ok": 0, "failed": 0, "max_ms": 0.0}
+        user = self.rng.choice(self.secret["probe_users"])
         end = time.monotonic() + seconds
+        tick = 0
         while time.monotonic() < end:
             try:
                 for s in self.stack.services():
@@ -173,15 +197,38 @@ class Probe:
                         not_ready[s["name"]] = not_ready.get(s["name"], 0) + 1
             except Exception:
                 not_ready["supervisor"] = not_ready.get("supervisor", 0) + 1
+            sku = self.rng.choice(self.secret["skus"])
             for path in (
-                "/api/catalog/products?page=2",
-                f"/api/catalog/products/{self.rng.choice(self.secret['skus'])}",
+                f"/api/catalog/products?page={1 + tick % 3}",
+                f"/api/catalog/products/{sku}",
+                "/api/catalog/search?q=" + self.rng.choice(["steel", "lamp", "cotton"]),
             ):
                 st, _, ms = self._req("GET", path, timeout=5)
                 total += 1
                 lat.append(ms)
                 if st != 200:
                     errors += 1
+            if tick % 4 == 0:
+                t0 = time.monotonic()
+                st, d, _ = self._req(
+                    "POST",
+                    "/api/auth/login",
+                    {"email": user["email"], "password": user["password"]},
+                )
+                ok = False
+                if st == 200:
+                    st, d, _ = self._req(
+                        "POST",
+                        "/api/checkout",
+                        {"items": [{"sku": sku, "qty": 1}]},
+                        token=d["token"],
+                        timeout=THRESHOLDS["checkout_timeout_s"],
+                    )
+                    ok = st == 201
+                ms = (time.monotonic() - t0) * 1000
+                checkouts["ok" if ok else "failed"] += 1
+                checkouts["max_ms"] = round(max(checkouts["max_ms"], ms), 1)
+            tick += 1
             time.sleep(interval)
         lat.sort()
         p95 = lat[min(len(lat) - 1, int(0.95 * len(lat)))] if lat else None
@@ -191,13 +238,16 @@ class Probe:
             and err <= THRESHOLDS["error_rate"]
             and p95 is not None
             and p95 <= THRESHOLDS["p95_ms"]
+            and checkouts["failed"] == 0
+            and checkouts["ok"] > 0
         )
         return {
             "ok": ok,
             "seconds": seconds,
-            "requests": total,
+            "reads": total,
             "error_rate": round(err, 3),
             "p95_ms": round(p95, 1) if p95 else None,
+            "checkouts": checkouts,
             "not_ready": not_ready,
         }
 
@@ -209,10 +259,13 @@ class Probe:
         def res(name, ok, detail=None):
             out[name] = {"ok": bool(ok), **({"detail": detail} if detail else {})}
 
-        prov = _ro(f"{h}/data/provider.db")
+        # snapshot order matters with live traffic: orders first, then the databases that
+        # are written after an order row exists (charges, events, stock commits)
+        t_orders = time.time()
         orders = _ro(f"{h}/data/orders.db")
         inv = _ro(f"{h}/data/inventory.db")
         broker = _ro(f"{h}/data/broker.db")
+        prov = _ro(f"{h}/data/provider.db")
         users = _ro(f"{h}/data/users.db")
         catalog = _ro(f"{h}/data/catalog.db")
         try:
@@ -263,9 +316,13 @@ class Probe:
 
             # every paid order: exactly one succeeded provider charge for its total
             charges = {}
-            for r in prov.execute("SELECT merchant_ref, amount_cents, status FROM charges"):
+            created = {}
+            for r in prov.execute(
+                "SELECT merchant_ref, amount_cents, status, created_at FROM charges"
+            ):
                 charges.setdefault(r[0], []).append((r[1], r[2]))
-            bad = []
+                created[r[0]] = min(created.get(r[0], r[3]), r[3])
+            bad, unrefunded = [], []
             for o in orders.execute("SELECT id, status, total_cents, updated_at FROM orders"):
                 ch = charges.get(o["id"], [])
                 if o["status"] in ("paid", "fulfilled"):
@@ -277,21 +334,16 @@ class Probe:
                 elif (
                     ch and any(s == "succeeded" for _, s in ch) and now - o["updated_at"] > grace_s
                 ):
-                    bad.append(
-                        {
-                            "order": o["id"],
-                            "status": o["status"],
-                            "charges": ch,
-                            "problem": "charged but not paid and not refunded",
-                        }
-                    )
+                    unrefunded.append({"order": o["id"], "status": o["status"], "charges": ch})
             known = {r[0] for r in orders.execute("SELECT id FROM orders")}
-            orphan = [ref for ref in charges if ref not in known]
+            # charges newer than the orders snapshot may belong to orders it cannot see yet
+            orphan = [ref for ref in charges if ref not in known and created[ref] < t_orders - 1.0]
             res(
                 "charges_match_orders",
                 not bad and not orphan,
                 (bad[:5] + [{"orphan_charge_for": o} for o in orphan[:5]]) or None,
             )
+            res("charged_failed_orders_refunded", not unrefunded, unrefunded[:5] or None)
 
             stuck = orders.execute(
                 "SELECT id, status, updated_at FROM orders WHERE "
@@ -299,6 +351,22 @@ class Probe:
                 (now - grace_s,),
             ).fetchall()
             res("paid_orders_fulfilled_or_refunded", not stuck, [dict(r) for r in stuck])
+
+            committed_by_order = {}
+            for r in inv.execute(
+                "SELECT order_id, sku, SUM(qty) FROM reservations WHERE status='committed' "
+                "GROUP BY order_id, sku"
+            ):
+                committed_by_order[(r[0], r[1])] = r[2]
+            uncommitted = []
+            for r in orders.execute(
+                "SELECT i.order_id, i.sku, i.qty FROM order_items i JOIN orders o ON "
+                "o.id=i.order_id WHERE o.status='fulfilled' AND o.updated_at < ?",
+                (now - grace_s,),
+            ):
+                if committed_by_order.get((r[0], r[1]), 0) != r[2]:
+                    uncommitted.append({"order": r[0], "sku": r[1], "qty": r[2]})
+            res("shipped_orders_stock_committed", not uncommitted, uncommitted[:5] or None)
 
             pending = orders.execute(
                 "SELECT COUNT(*) FROM outbox WHERE published_at IS NULL AND created_at < ?",
@@ -315,42 +383,54 @@ class Probe:
                 r[0]: r[1]
                 for r in broker.execute("SELECT topic, COUNT(*) FROM messages GROUP BY topic")
             }
-            missing_entries = []
-            for topic, queues in EXPECTED_QUEUES.items():
-                for q in queues:
-                    n = broker.execute(
-                        "SELECT COUNT(*) FROM messages m LEFT JOIN entries e ON e.msg_id=m.id "
-                        "AND e.queue=? WHERE m.topic=? AND e.msg_id IS NULL",
-                        (q, topic),
-                    ).fetchone()[0]
-                    if n:
-                        missing_entries.append({"queue": q, "topic": topic, "missing": n})
-            dead = broker.execute(
-                "SELECT queue, COUNT(*) n FROM entries WHERE state='dead' GROUP BY queue"
-            ).fetchall()
-            stale = broker.execute(
-                "SELECT queue, COUNT(*) n FROM entries WHERE state!='acked' "
-                "AND state!='dead' AND updated_at < ? GROUP BY queue",
-                (now - grace_s,),
-            ).fetchall()
-            lost = (
-                pending
-                or missing_entries
-                or dead
-                or stale
-                or any(n_msgs.get(t, 0) < n for t, n in n_outbox.items())
-            )
+            # a message is valid if it refers to an order that exists; malformed messages
+            # (poison) may be dead-lettered or dropped without counting as lost
+            order_ids = {r[0] for r in orders.execute("SELECT id FROM orders")}
+            valid = {}
+            for r in broker.execute("SELECT id, topic, payload FROM messages"):
+                try:
+                    oid = json.loads(r["payload"]).get("order_id")
+                except (ValueError, AttributeError):
+                    oid = None
+                if oid in order_ids and r["topic"] in EXPECTED_QUEUES:
+                    valid[r["id"]] = r["topic"]
+            entries = {}
+            for r in broker.execute("SELECT queue, msg_id, state, updated_at FROM entries"):
+                entries[(r["queue"], r["msg_id"])] = (r["state"], r["updated_at"])
+            missing, dead, stale = [], [], []
+            for mid, topic in valid.items():
+                for q in EXPECTED_QUEUES[topic]:
+                    e = entries.get((q, mid))
+                    if e is None:
+                        missing.append({"queue": q, "msg_id": mid})
+                    elif e[0] == "dead":
+                        dead.append({"queue": q, "msg_id": mid})
+                    elif e[0] != "acked" and now - e[1] > grace_s:
+                        stale.append({"queue": q, "msg_id": mid, "state": e[0]})
+            short = [t for t, n in n_outbox.items() if n_msgs.get(t, 0) < n]
             res(
                 "no_lost_messages",
-                not lost,
+                not missing and not short,
                 None
-                if not lost
+                if not missing and not short
+                else {
+                    "missing_queue_entries": missing[:5],
+                    "missing_count": len(missing),
+                    "outbox_published_but_not_in_broker": short,
+                },
+            )
+            undelivered = pending or dead or stale
+            res(
+                "events_delivered",
+                not undelivered,
+                None
+                if not undelivered
                 else {
                     "outbox_unpublished": pending,
-                    "published_vs_broker": [n_outbox, n_msgs],
-                    "missing_queue_entries": missing_entries,
-                    "dead_letters": [dict(r) for r in dead],
-                    "stale_unacked": [dict(r) for r in stale],
+                    "dead_lettered_valid": dead[:5],
+                    "dead_count": len(dead),
+                    "stale_unacked": stale[:5],
+                    "stale_count": len(stale),
                 },
             )
 

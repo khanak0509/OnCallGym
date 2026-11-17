@@ -62,21 +62,48 @@ def _port_free(port: int) -> bool:
             return False
 
 
-def claim_port_block(root: str) -> tuple[int, int]:
-    """Return (block index, lock fd). The fd must stay open while the stack lives."""
-    lock_dir = os.path.join(root, "locks")
-    os.makedirs(lock_dir, exist_ok=True)
+LOCK_DIR = os.environ.get(
+    "ONCALLGYM_LOCK_DIR", os.path.join(tempfile.gettempdir(), "oncallgym-ports")
+)
+
+
+def _sweep_stale(owner: str):
+    """The previous holder of this block died without cleaning up: kill whatever is left
+    of its stack and delete its directories (spec: cleanup even on crash)."""
+    try:
+        info = json.loads(owner)
+    except ValueError:
+        return
+    home, private = info.get("home"), info.get("private")
+    if home:
+        for pid in leftover_processes(home):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+    for d in (home, private):
+        if d and os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def claim_port_block(home: str, private: str) -> tuple[int, int]:
+    """Return (block index, lock fd). The fd must stay open while the stack lives. Locks
+    are machine-wide (not per root) so stacks under different roots never share ports."""
+    os.makedirs(LOCK_DIR, exist_ok=True)
     for i in range(MAX_BLOCKS):
-        fd = os.open(os.path.join(lock_dir, f"block-{i}.lock"), os.O_CREAT | os.O_RDWR, 0o644)
+        fd = os.open(os.path.join(LOCK_DIR, f"block-{i}.lock"), os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             os.close(fd)
             continue
+        previous = os.pread(fd, 4096, 0).decode(errors="replace").strip()
+        if previous:
+            _sweep_stale(previous)
         base = BASE_PORT + i * BLOCK_SIZE
         if all(_port_free(base + k) for k in range(BLOCK_SIZE)):
             os.ftruncate(fd, 0)
-            os.write(fd, f"{os.getpid()}\n".encode())
+            os.pwrite(
+                fd, json.dumps({"pid": os.getpid(), "home": home, "private": private}).encode(), 0
+            )
             return i, fd
         os.close(fd)
     raise RuntimeError("no free port block")
@@ -110,7 +137,7 @@ class Stack:
     # lifecycle
     def create(self):
         t0 = time.time()
-        self.block, self._lock_fd = claim_port_block(self.root)
+        self.block, self._lock_fd = claim_port_block(self.home, self.private)
         base = BASE_PORT + self.block * BLOCK_SIZE
         info = provision(self.home, self.private, base, self.seed)
         self.ports = info["ports"]
@@ -223,8 +250,10 @@ class Stack:
         shutil.rmtree(self.home, ignore_errors=True)
         shutil.rmtree(self.private, ignore_errors=True)
         if self._lock_fd is not None:
-            # lock files are not unlinked (that would race with a waiting claimer);
-            # `clean` removes the whole root when nothing is running
+            # lock files are not unlinked (that would race with a waiting claimer); mark the
+            # block as cleanly released so the next claimer has nothing to sweep
+            with contextlib.suppress(OSError):
+                os.ftruncate(self._lock_fd, 0)
             os.close(self._lock_fd)
             self._lock_fd = None
 
@@ -262,6 +291,8 @@ def leftover_processes(root: str | None = None) -> list[int]:
 
 
 def clean(root: str | None = None) -> dict:
+    """Kill every Northwind process under root, delete root, and reset port locks that no
+    live stack holds."""
     root = root or default_root()
     killed = []
     for pid in leftover_processes(root):
@@ -269,7 +300,22 @@ def clean(root: str | None = None) -> dict:
             os.kill(pid, signal.SIGKILL)
             killed.append(pid)
     shutil.rmtree(root, ignore_errors=True)
-    return {"killed": killed, "removed": root}
+    released = 0
+    if os.path.isdir(LOCK_DIR):
+        for name in os.listdir(LOCK_DIR):
+            path = os.path.join(LOCK_DIR, name)
+            fd = os.open(path, os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue  # a live stack (possibly under another root) holds it
+            finally:
+                os.close(fd)
+            os.unlink(path)
+            released += 1
+        with contextlib.suppress(OSError):
+            os.rmdir(LOCK_DIR)
+    return {"killed": killed, "removed": root, "stale_locks_removed": released}
 
 
 def _print(obj):

@@ -21,8 +21,11 @@ def test_provision_is_deterministic(tmp_path):
     assert a["skus"] == b["skus"]
     va = json.load(open(tmp_path / "pa" / "verifier.json"))
     vb = json.load(open(tmp_path / "pb" / "verifier.json"))
-    assert va["seed_hashes"] == vb["seed_hashes"]
-    assert va["probe_users"] == vb["probe_users"]
+    assert va["seed_hashes"]["catalog.products"] == vb["seed_hashes"]["catalog.products"]
+    assert [u["email"] for u in va["probe_users"]] == [u["email"] for u in vb["probe_users"]]
+    # probe passwords must not be derivable from the seed
+    assert [u["password"] for u in va["probe_users"]] != [u["password"] for u in vb["probe_users"]]
+    assert os.stat(tmp_path / "pa").st_mode & 0o077 == 0
 
 
 def test_provision_layout(tmp_path):

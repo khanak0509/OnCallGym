@@ -103,3 +103,72 @@ def test_stop_kills_everything_even_if_supervisor_is_killed(tmp_path):
     for pid in pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+
+
+@pytest.mark.stack
+@linux_only
+def test_restart_all_then_probe_passes(running):
+    running.restart_all()
+    deadline = time.time() + 30
+    while time.time() < deadline and not all(s["ready"] for s in running.services()):
+        time.sleep(0.5)
+    time.sleep(2)
+    r = Probe(running).run(journeys=1, window_s=3)
+    assert r["passed"], r
+
+
+@pytest.mark.stack
+@linux_only
+def test_oom_kill_and_backoff(tmp_path):
+    import yaml
+
+    s = Stack(seed=4, root=str(tmp_path))
+    s.create()
+    path = os.path.join(s.home, "etc/supervisor.yaml")
+    cfg = yaml.safe_load(open(path))
+    cfg["services"]["cache"]["memory_limit_mb"] = 5  # below a python process's RSS
+    yaml.safe_dump(cfg, open(path, "w"))
+    try:
+        s.start(timeout_s=12)
+    except TimeoutError:
+        pass
+    try:
+        time.sleep(6)
+        st = {x["name"]: x for x in s.services()}["cache"]
+        assert st["oom_kills"] >= 2
+        assert st["restarts"] >= 2
+        log = open(os.path.join(s.home, "logs/supervisor.log")).read()
+        assert "Out of memory: killed process" in log
+        assert "restart_in_s=2" in log  # backoff grows 1 s -> 2 s
+    finally:
+        s.cleanup()
+
+
+@pytest.mark.stack
+@linux_only
+def test_crashed_owner_is_swept_by_next_claim(tmp_path):
+    import subprocess
+    import sys
+
+    root = str(tmp_path)
+    code = (
+        "import time; from oncallgym.stack import Stack; "
+        f"s = Stack(seed=6, root={root!r}); s.create(); s.start(); "
+        "print(s.home, s.private, flush=True); time.sleep(60)"
+    )
+    p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    home, private = p.stdout.readline().split()
+    p.kill()
+    p.wait()
+    time.sleep(2)  # supervisor notices its parent is gone and stops the services
+    assert os.path.isdir(home)  # nobody cleaned up yet
+    s = Stack(seed=7, root=root)
+    try:
+        s.create()  # reclaims a free block; the dead owner's block gets swept
+        deadline = time.time() + 5
+        while time.time() < deadline and os.path.isdir(home):
+            time.sleep(0.2)
+    finally:
+        s.cleanup()
+    assert not os.path.isdir(home) and not os.path.isdir(private)
+    assert leftover_processes(root) == []

@@ -111,3 +111,12 @@ def test_pool_tx_rolls_back(tmp_path):
             c.execute("INSERT INTO t VALUES (1)")
             raise RuntimeError("boom")
     assert pool.one("SELECT COUNT(*) AS n FROM t")["n"] == 0
+
+
+def test_breaker_releases_trial_without_verdict():
+    b = CircuitBreaker(failure_threshold=1, reset_timeout_s=0.01)
+    b.failure()
+    time.sleep(0.02)
+    assert b.allow() and b.state == HALF_OPEN
+    b.release_trial()  # e.g. local pool exhausted: the upstream was never called
+    assert b.allow()
