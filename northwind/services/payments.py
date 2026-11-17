@@ -24,7 +24,7 @@ def main():
                 (*fields.values(), time.time(), cid),
             )
 
-    @svc.app.route("POST", "/charges")
+    @svc.app.route("POST", "/charges", internal=True)
     def charge(req):
         b = req.json
         order_id, amount, key = (
@@ -92,7 +92,7 @@ def main():
         )
         return 200, {"charge_id": cid, "status": "succeeded"}
 
-    @svc.app.route("POST", "/refunds")
+    @svc.app.route("POST", "/refunds", internal=True)
     def refund(req):
         """Refund every successful provider charge for an order. The provider is the source
         of truth: a charge can have succeeded there even if our attempt timed out."""
@@ -144,7 +144,7 @@ def main():
             )
         return 200, {"order_id": order_id, "refunded": len(refunded), "charged": len(remote) > 0}
 
-    @svc.app.route("GET", "/charges")
+    @svc.app.route("GET", "/charges", internal=True)
     def list_charges(req):
         order_id = req.arg("order_id")
         if order_id:

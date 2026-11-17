@@ -7,7 +7,9 @@ toolset as its own process) calls the same Episode object. No logic lives here.
   GET  /state                                 -> {"done", "termination", "turns", "tokens_used"}
 """
 
+import hmac
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -17,6 +19,9 @@ from .episode import Episode
 class EpisodeServer:
     def __init__(self, episode: Episode):
         self.ep = episode
+        # every request must carry this token (other local processes, e.g. something the
+        # agent started, cannot drive the episode)
+        self.token = os.urandom(16).hex()
         self.lock = threading.Lock()  # tool calls of one episode are sequential
         server = self
 
@@ -32,7 +37,12 @@ class EpisodeServer:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _authorized(self):
+                return hmac.compare_digest(self.headers.get("X-Episode-Token", ""), server.token)
+
             def do_GET(self):
+                if not self._authorized():
+                    return self._send(403, {"error": "forbidden"})
                 if self.path == "/state":
                     e = server.ep
                     return self._send(
@@ -47,6 +57,8 @@ class EpisodeServer:
                 self._send(404, {"error": "not found"})
 
             def do_POST(self):
+                if not self._authorized():
+                    return self._send(403, {"error": "forbidden"})
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
                 with server.lock:

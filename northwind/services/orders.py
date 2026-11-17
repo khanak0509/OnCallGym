@@ -202,7 +202,7 @@ def main():
             require(claims["sub"] == o["user_id"], 404, "order not found")
         return 200, o
 
-    @svc.app.route("POST", "/orders/{id}/fulfill")
+    @svc.app.route("POST", "/orders/{id}/fulfill", internal=True)
     def fulfill(req):
         oid = req.params["id"]
         tracking = req.json.get("tracking")
@@ -234,7 +234,7 @@ def main():
             )
         return 200, {"order_id": oid, "status": "fulfilled"}
 
-    @svc.app.route("POST", "/orders/{id}/refunded")
+    @svc.app.route("POST", "/orders/{id}/refunded", internal=True)
     def mark_refunded(req):
         oid = req.params["id"]
         o = db.one("SELECT status FROM orders WHERE id=?", (oid,))
@@ -242,7 +242,7 @@ def main():
         set_status(oid, "refunded", reason=req.json.get("reason", "refunded"))
         return 200, {"order_id": oid, "status": "refunded"}
 
-    @svc.app.route("POST", "/orders/{id}/abandon")
+    @svc.app.route("POST", "/orders/{id}/abandon", internal=True)
     def abandon(req):
         oid = req.params["id"]
         o = db.one("SELECT status FROM orders WHERE id=?", (oid,))
@@ -252,7 +252,7 @@ def main():
             call(inventory, "POST", f"/reservations/{oid}/release")
         return 200, {"order_id": oid}
 
-    @svc.app.route("GET", "/orders")
+    @svc.app.route("GET", "/orders", internal=True)
     def list_orders(req):
         status = req.arg("status")
         older = float(req.arg("older_than_s", 0))

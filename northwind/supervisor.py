@@ -17,6 +17,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import signal
 import ssl
 import subprocess
@@ -29,6 +30,34 @@ import yaml
 from northwind.lib.http import App, make_server, serve_in_thread
 from northwind.lib.log import Logger
 from northwind.lib.metrics import Registry
+from northwind.lib.service import read_token
+
+CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+ENV_DENY_PREFIXES = ("PYTHON", "LD_", "DYLD_", "GCONV", "SSL_", "OPENSSL")
+ENV_DENY = {
+    "PATH",
+    "HOME",
+    "SHELL",
+    "IFS",
+    "ENV",
+    "BASH_ENV",
+    "TMPDIR",
+    "NW_HOME",
+    "NW_SUPERVISOR_PID",
+}
+
+
+def safe_env(values: dict) -> dict:
+    """Env files are editable by the agent: accept only plain application variables,
+    never anything that changes how the interpreter or the loader behaves."""
+    out = {}
+    for k, v in values.items():
+        if not ENV_KEY.match(k) or k in ENV_DENY or k.startswith(ENV_DENY_PREFIXES):
+            continue
+        out[k] = v[:512]
+    return out
+
 
 ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "TMPDIR")
 PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
@@ -106,13 +135,19 @@ class Supervisor:
     def spawn(self, p: Proc):
         # services get a minimal environment: never the parent's tokens or credentials
         env = {k: os.environ[k] for k in ENV_ALLOWLIST if k in os.environ}
-        env.update(read_env_file(os.path.join(self.home, f"etc/env/{p.name}.env")))
+        env.update(safe_env(read_env_file(os.path.join(self.home, f"etc/env/{p.name}.env"))))
         env["NW_HOME"] = self.home
         env["NW_SUPERVISOR_PID"] = str(os.getpid())
         env["PYTHONUNBUFFERED"] = "1"
         out = open(os.path.join(self.home, f"logs/{p.name}.stdout"), "ab")
+        # -I: ignore PYTHON* env vars, user site and the cwd, so nothing in the episode
+        # directory (which the agent can edit) can inject code; code path set explicitly
+        boot = (
+            f"import sys; sys.path.insert(0, {CODE_ROOT!r}); import runpy; "
+            f"runpy.run_module('northwind.services.{p.name}', run_name='__main__')"
+        )
         p.popen = subprocess.Popen(
-            [sys.executable, "-m", f"northwind.services.{p.name}", "--home", self.home],
+            [sys.executable, "-I", "-c", boot, "--home", self.home],
             cwd=self.home,
             env=env,
             stdout=out,
@@ -320,6 +355,7 @@ class Supervisor:
     def serve(self):
         app = App("supervisor", self.log, Registry())
         app.quiet_paths.add("/services")
+        app.internal_token = read_token(self.home)
 
         @app.route("GET", "/services")
         def services(req):
@@ -329,7 +365,7 @@ class Supervisor:
                 "services": self.status(),
             }
 
-        @app.route("POST", "/services/{name}/restart")
+        @app.route("POST", "/services/{name}/restart", internal=True)
         def restart(req):
             name = req.params["name"]
             if name not in self.procs:
@@ -337,14 +373,14 @@ class Supervisor:
             self.restart(name)
             return 200, {"restarted": name}
 
-        @app.route("POST", "/restart-all")
+        @app.route("POST", "/restart-all", internal=True)
         def restart_all(req):
             for layer in self.cfg["layers"]:
                 for name in layer:
                     self.restart(name)
             return 200, {"restarted": "all"}
 
-        @app.route("POST", "/shutdown")
+        @app.route("POST", "/shutdown", internal=True)
         def shutdown(req):
             threading.Thread(
                 target=lambda: (time.sleep(0.1), self.stopping.set()), daemon=True

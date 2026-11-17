@@ -91,7 +91,7 @@ def main():
             reason=(err or "")[:120],
         )
 
-    @svc.app.route("POST", "/publish")
+    @svc.app.route("POST", "/publish", internal=True)
     def publish(req):
         b = req.json
         require(b.get("topic"), 400, "missing topic")
@@ -124,7 +124,7 @@ def main():
             )
         return 200, {"id": mid, "queues": queues}
 
-    @svc.app.route("POST", "/subscribe")
+    @svc.app.route("POST", "/subscribe", internal=True)
     def subscribe(req):
         """Declare a queue's subscriptions: the queue is bound to exactly `topics`
         (bindings to other topics are removed). Changes are recorded in binding_log."""
@@ -170,7 +170,7 @@ def main():
         svc.log.info("queue backfilled", queue=q, topic=topic, count=cur.rowcount)
         return 200, {"backfilled": cur.rowcount}
 
-    @svc.app.route("POST", "/consume")
+    @svc.app.route("POST", "/consume", internal=True)
     def consume(req):
         b = req.json
         queue = b.get("queue")
@@ -253,8 +253,8 @@ def main():
         svc.metrics.inc("broker_redeliveries_total", queue=queue)
         return 200, {"requeued": True}
 
-    svc.app.route("POST", "/ack")(lambda req: settle(req, True))
-    svc.app.route("POST", "/nack")(lambda req: settle(req, False))
+    svc.app.route("POST", "/ack", internal=True)(lambda req: settle(req, True))
+    svc.app.route("POST", "/nack", internal=True)(lambda req: settle(req, False))
 
     def queue_stats():
         with lock:

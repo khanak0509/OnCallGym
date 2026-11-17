@@ -9,6 +9,8 @@ import random
 import threading
 import time
 
+import yaml
+
 from northwind.lib.broker_client import Consumer
 from northwind.lib.service import Service
 
@@ -35,7 +37,8 @@ def main():
                 except (ValueError, KeyError):
                     continue
 
-    relay_error_rate = float(cfg.get("smtp", {}).get("error_rate", 0.0))
+    with open(svc.path(cfg.get("smtp_file", "etc/external/smtp.yaml"))) as f:
+        relay_error_rate = float((yaml.safe_load(f) or {}).get("error_rate", 0.0))
     rng = random.Random()
 
     def handle(msg):

@@ -30,6 +30,15 @@ def rss_bytes() -> int:
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
+def read_token(home: str) -> str | None:
+    """Service-to-service token; the file is readable only by the stack owner."""
+    try:
+        with open(os.path.join(home, "run", "internal.token")) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 class FlagsClient:
     """Polls the flags service; on failure keeps the last good values, and before the first
     successful fetch uses the service's local defaults (as real services do)."""
@@ -97,6 +106,8 @@ class Service:
         self.log = Logger(name, self.path(f"logs/{name}.log"), log_cfg.get("level", "info"))
         self.metrics = Registry()
         self.app = App(name, self.log, self.metrics)
+        self.internal_token = read_token(self.home)
+        self.app.internal_token = self.internal_token
         self.stopping = threading.Event()
         self.started_at = time.time()
         self.ready_checks: list = []
@@ -117,11 +128,13 @@ class Service:
         with open(self.path(f"etc/{self.name}.yaml")) as f:
             return yaml.safe_load(f) or {}
 
-    def upstream(self, name: str) -> Upstream:
+    def upstream(self, name: str, internal: bool = True) -> Upstream:
+        """internal=False for clients that relay outside traffic (the edge proxy)."""
         cfg = dict(self.config["upstreams"][name])
         if cfg.get("ca_file"):
             cfg["ca_file"] = self.path(cfg["ca_file"])
-        return Upstream(self.name, name, cfg, self.metrics, self.log)
+        token = self.internal_token if internal else None
+        return Upstream(self.name, name, cfg, self.metrics, self.log, token=token)
 
     def database(self, name: str, key: str = "db") -> Pool:
         """Pool for config section `key` ({path, pool_size, acquire_timeout_ms}) and a

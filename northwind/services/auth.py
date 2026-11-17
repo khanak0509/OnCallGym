@@ -66,7 +66,7 @@ def main():
         svc.metrics.inc("auth_logins_total", outcome="ok")
         return 200, {"token": token, "expires_in": ttl, "user_id": user["id"]}
 
-    @svc.app.route("POST", "/verify")
+    @svc.app.route("POST", "/verify", internal=True)
     def verify(req):
         token = req.json.get("token", "")
         try:
@@ -75,7 +75,7 @@ def main():
             return 401, {"valid": False, "error": str(e)}
         return 200, {"valid": True, "claims": claims}
 
-    @svc.app.route("GET", "/users/{id}")
+    @svc.app.route("GET", "/users/{id}", internal=True)
     def get_user(req):
         user = db.one(
             "SELECT id, email, name, address FROM users WHERE id=?", (int(req.params["id"]),)

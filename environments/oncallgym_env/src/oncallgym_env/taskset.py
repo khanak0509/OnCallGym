@@ -52,19 +52,17 @@ class OnCallTask(Task[OnCallData, OnCallState, OnCallTaskConfig]):
         d = self.data
         traj = "trajectory.json"
         if self.config.trajectory_dir:
-            os.makedirs(self.config.trajectory_dir, exist_ok=True)
+            os.makedirs(self.config.trajectory_dir, mode=0o700, exist_ok=True)
             name = d.name.replace("/", "_")
             traj = os.path.join(self.config.trajectory_dir, f"{name}-{uuid.uuid4().hex[:8]}.json")
+        task = json.dumps({"family": d.family, "variant": d.variant, "seed": d.seed})
+        await runtime.write("task.json", task.encode())
         argv = [
             sys.executable,
             "-m",
             "oncallgym.episode_host",
-            "--family",
-            d.family,
-            "--variant",
-            str(d.variant),
-            "--seed",
-            str(d.seed),
+            "--task-file",
+            "task.json",
             "--ready-file",
             "episode.json",
             "--trajectory-file",
@@ -84,6 +82,7 @@ class OnCallTask(Task[OnCallData, OnCallState, OnCallTaskConfig]):
         if "error" in info:
             raise RuntimeError(f"episode failed to start: {info['error']}")
         trace.state.episode_url = info["url"]
+        trace.state.episode_token = info["token"]
 
     @stop
     def submitted(self, trace: Trace) -> bool:
@@ -92,7 +91,12 @@ class OnCallTask(Task[OnCallData, OnCallState, OnCallTaskConfig]):
     @reward(weight=1.0)
     async def oncall(self, trace: Trace) -> float:
         async with httpx.AsyncClient(timeout=180) as client:
-            b = (await client.post(f"{trace.state.episode_url}/finish")).json()
+            b = (
+                await client.post(
+                    f"{trace.state.episode_url}/finish",
+                    headers={"X-Episode-Token": trace.state.episode_token},
+                )
+            ).json()
         trace.info["oncallgym"] = b
         for key in ("R", "P", "C", "G"):
             trace.record_metric(key, float(b[key]))
@@ -103,7 +107,11 @@ class OnCallTask(Task[OnCallData, OnCallState, OnCallTaskConfig]):
     @metric
     async def turns(self, trace: Trace) -> float:
         async with httpx.AsyncClient(timeout=10) as client:
-            return float((await client.get(f"{trace.state.episode_url}/state")).json()["turns"])
+            r = await client.get(
+                f"{trace.state.episode_url}/state",
+                headers={"X-Episode-Token": trace.state.episode_token},
+            )
+            return float(r.json()["turns"])
 
 
 class OnCallTaskset(Taskset[OnCallTask, OnCallConfig]):

@@ -28,7 +28,7 @@ def main():
         require(r, 404, "unknown sku")
         return 200, r
 
-    @svc.app.route("POST", "/reservations")
+    @svc.app.route("POST", "/reservations", internal=True)
     def reserve(req):
         b = req.json
         order_id, items = b.get("order_id"), b.get("items") or []
@@ -95,14 +95,14 @@ def main():
                 )
         return len(rows)
 
-    @svc.app.route("POST", "/reservations/{order_id}/release")
+    @svc.app.route("POST", "/reservations/{order_id}/release", internal=True)
     def release(req):
         n = finish(req.params["order_id"], "released")
         if n:
             svc.metrics.inc("inventory_reservations_total", outcome="released")
         return 200, {"released": n}
 
-    @svc.app.route("POST", "/reservations/{order_id}/commit")
+    @svc.app.route("POST", "/reservations/{order_id}/commit", internal=True)
     def commit(req):
         return 200, {"committed": finish(req.params["order_id"], "committed")}
 

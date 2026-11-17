@@ -10,8 +10,10 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH=/opt/venv/bin:$PATH
 
 # dev runs the stacks; agent runs the AI agent's shell commands (no write access to data)
-RUN useradd -m dev && useradd --no-create-home --shell /bin/sh agent \
-    && mkdir -p /opt/venv && chown dev /opt/venv \
-    && echo "dev ALL=(agent) NOPASSWD: ALL" > /etc/sudoers.d/agent && chmod 0440 /etc/sudoers.d/agent
+RUN useradd -m dev && mkdir -p /opt/venv && chown dev /opt/venv \
+    && users="" && for i in $(seq 0 15); do useradd --no-create-home --shell /bin/sh agent$i; \
+       users="$users,agent$i"; done \
+    && echo "dev ALL=(${users#,}) NOPASSWD: ALL" > /etc/sudoers.d/agent \
+    && chmod 0440 /etc/sudoers.d/agent
 USER dev
 WORKDIR /workspace

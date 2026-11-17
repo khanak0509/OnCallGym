@@ -45,7 +45,7 @@ def main():
         m.gauge_fn(f"cache_{key}_total", lambda key=key: stats[key])
     svc.every(5.0, expire_now, "expire")
 
-    @svc.app.route("GET", "/kv/{key}")
+    @svc.app.route("GET", "/kv/{key}", internal=True)
     def get(req):
         k = req.params["key"]
         with lock:
@@ -59,7 +59,7 @@ def main():
             stats["hits"] += 1
             return 200, {"key": k, "value": item[0].decode()}
 
-    @svc.app.route("PUT", "/kv/{key}")
+    @svc.app.route("PUT", "/kv/{key}", internal=True)
     def put(req):
         k = req.params["key"]
         body = req.json
@@ -90,7 +90,7 @@ def main():
             stats["used"] += need
         return 200, {"stored": True}
 
-    @svc.app.route("DELETE", "/kv/{key}")
+    @svc.app.route("DELETE", "/kv/{key}", internal=True)
     def delete(req):
         with lock:
             if req.params["key"] in data:

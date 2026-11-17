@@ -14,6 +14,7 @@ from oncallgym.episode import tool_schemas
 
 class OnCallState(State):
     episode_url: str = ""
+    episode_token: str = ""
     done: bool = False
 
 
@@ -40,8 +41,12 @@ class OnCallToolset(Toolset[SharedToolsetConfig, OnCallState]):
     ) -> CallToolResult:
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
-                f"{self.state.episode_url}/call", json={"name": name, "args": arguments or {}}
+                f"{self.state.episode_url}/call",
+                json={"name": name, "args": arguments or {}},
+                headers={"X-Episode-Token": self.state.episode_token},
             )
+        if r.status_code != 200:
+            raise RuntimeError(f"episode server returned {r.status_code}")
         body = r.json()
         if body.get("done"):
             self.state.done = True

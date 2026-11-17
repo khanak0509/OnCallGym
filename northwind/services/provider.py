@@ -25,7 +25,7 @@ def main():
     def delay():
         time.sleep(max(0.0, (lat.get("base", 40) + rng.uniform(0, lat.get("jitter", 30))) / 1000))
 
-    @svc.app.route("POST", "/v1/charges")
+    @svc.app.route("POST", "/v1/charges", internal=True)
     def charge(req):
         b = req.json
         key = req.headers.get("Idempotency-Key")
@@ -62,7 +62,7 @@ def main():
             "status": "succeeded",
         }
 
-    @svc.app.route("POST", "/v1/refunds")
+    @svc.app.route("POST", "/v1/refunds", internal=True)
     def refund(req):
         b = req.json
         delay()
@@ -80,7 +80,7 @@ def main():
             c.execute("UPDATE charges SET status='refunded' WHERE id=?", (ch["id"],))
         return 200, {"id": rid, "charge_id": ch["id"], "amount_cents": ch["amount_cents"]}
 
-    @svc.app.route("GET", "/v1/charges")
+    @svc.app.route("GET", "/v1/charges", internal=True)
     def list_charges(req):
         ref = req.arg("merchant_ref")
         require(ref, 400, "merchant_ref required")

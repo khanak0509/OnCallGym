@@ -6,6 +6,7 @@ request writes one access log line (type=access) that telemetry uses to build tr
 """
 
 import contextvars
+import hmac
 import http.client
 import json
 import queue
@@ -68,15 +69,20 @@ class App:
         self.log = log
         self.metrics = metrics
         self.routes: list[tuple[str, re.Pattern, callable, str]] = []
+        self.internal: set[tuple[str, str]] = set()  # (method, pattern) needing the token
+        self.internal_token: str | None = None
         self.fallback = None  # fn(req) -> (route_label, result), used by the edge proxy
         self.quiet_paths = set(QUIET_PATHS)
 
-    def route(self, method: str, pattern: str):
-        """Register a handler; pattern uses {name} placeholders, e.g. /orders/{id}."""
+    def route(self, method: str, pattern: str, internal: bool = False):
+        """Register a handler; pattern uses {name} placeholders, e.g. /orders/{id}.
+        internal=True: service-to-service only (requires X-Internal-Token)."""
         regex = re.compile("^" + re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern) + "$")
 
         def deco(fn):
             self.routes.append((method, regex, fn, pattern))
+            if internal:
+                self.internal.add((method, pattern))
             return fn
 
         return deco
@@ -91,6 +97,14 @@ class App:
             if method != req.method:
                 continue
             req.params = m.groupdict()
+            if (
+                (method, pattern) in self.internal
+                and self.internal_token
+                and not hmac.compare_digest(
+                    req.headers.get("X-Internal-Token", ""), self.internal_token
+                )
+            ):
+                return pattern, (403, {"error": "internal endpoint"})
             return pattern, fn(req)
         if allowed:
             return req.path, (405, {"error": "method not allowed"})
@@ -226,8 +240,11 @@ class Upstream:
       retry_on_status (list), breaker: {failure_threshold, window_s, reset_timeout_s}, ca_file
     """
 
-    def __init__(self, caller: str, name: str, cfg: dict, metrics=None, log=None):
+    def __init__(
+        self, caller: str, name: str, cfg: dict, metrics=None, log=None, token: str | None = None
+    ):
         self.caller = caller
+        self.token = token
         self.name = name
         self.cfg = cfg
         parts = urlsplit(cfg["url"])
@@ -314,6 +331,8 @@ class Upstream:
 
     def request(self, method: str, path: str, body=None, headers=None) -> Response:
         hdrs = {"Content-Type": "application/json", "X-Caller": self.caller}
+        if self.token:
+            hdrs["X-Internal-Token"] = self.token
         rid = current_request_id.get()
         if rid:
             hdrs["X-Request-Id"] = rid

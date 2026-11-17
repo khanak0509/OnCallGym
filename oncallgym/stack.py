@@ -109,11 +109,14 @@ def claim_port_block(home: str, private: str) -> tuple[int, int]:
     raise RuntimeError("no free port block")
 
 
-def http_json(port: int, method: str, path: str, body=None, timeout=5.0):
+def http_json(port: int, method: str, path: str, body=None, timeout=5.0, token=None):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
         data = json.dumps(body).encode() if body is not None else None
-        c.request(method, path, body=data, headers={"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Internal-Token"] = token
+        c.request(method, path, body=data, headers=headers)
         r = c.getresponse()
         raw = r.read()
         return r.status, (json.loads(raw) if raw else {})
@@ -144,7 +147,9 @@ class Stack:
         self.timings["provision_s"] = round(time.time() - t0, 2)
         return self
 
-    def start(self, timeout_s: float = 30.0):
+    def start(self, timeout_s: float = 30.0, require_ready: bool = True):
+        """Start the supervisor and wait for boot. With require_ready (default) also wait
+        until every service is ready; a stack started with a fault may never be."""
         assert_contained()
         if not self.ports:
             self.create()
@@ -174,7 +179,11 @@ class Stack:
                 )
             try:
                 st, body = http_json(self.ports["supervisor"], "GET", "/services", timeout=1)
-                if st == 200 and body["booted"] and all(s["ready"] for s in body["services"]):
+                if (
+                    st == 200
+                    and body["booted"]
+                    and (not require_ready or all(s["ready"] for s in body["services"]))
+                ):
                     self.timings["cold_start_s"] = round(time.time() - t0, 2)
                     return self
             except (OSError, http.client.HTTPException, ValueError):
@@ -204,15 +213,25 @@ class Stack:
         except (OSError, http.client.HTTPException, ValueError) as e:
             return f"supervisor unreachable: {e}"
 
+    @property
+    def token(self) -> str | None:
+        from northwind.lib.service import read_token
+
+        return read_token(self.home)
+
+    def call(self, service: str, method: str, path: str, body=None, timeout=10.0):
+        """HTTP call to one of this stack's services with the internal token."""
+        return http_json(self.ports[service], method, path, body, timeout=timeout, token=self.token)
+
     def services(self) -> list[dict]:
         _, body = http_json(self.ports["supervisor"], "GET", "/services")
         return body["services"]
 
     def restart(self, name: str):
-        return http_json(self.ports["supervisor"], "POST", f"/services/{name}/restart", timeout=15)
+        return self.call("supervisor", "POST", f"/services/{name}/restart", timeout=15)
 
     def restart_all(self):
-        return http_json(self.ports["supervisor"], "POST", "/restart-all", timeout=90)
+        return self.call("supervisor", "POST", "/restart-all", timeout=90)
 
     def total_rss_mb(self) -> float:
         """RSS of the supervisor plus every service process."""
@@ -229,7 +248,7 @@ class Stack:
             return
         pgid = self.proc.pid
         with contextlib.suppress(OSError, http.client.HTTPException, ValueError):
-            http_json(self.ports["supervisor"], "POST", "/shutdown", timeout=2)
+            self.call("supervisor", "POST", "/shutdown", timeout=2)
         try:
             self.proc.wait(15)
         except subprocess.TimeoutExpired:

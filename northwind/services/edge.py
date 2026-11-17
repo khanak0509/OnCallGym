@@ -19,7 +19,8 @@ FORWARD_HEADERS = ("Authorization", "Idempotency-Key", "Content-Type")
 def main():
     svc = Service("edge")
     cfg = svc.config
-    ups = {name: svc.upstream(name) for name in cfg["upstreams"]}
+    # client traffic is relayed without the internal token
+    ups = {name: svc.upstream(name, internal=False) for name in cfg["upstreams"]}
     routes = sorted(cfg["routes"], key=lambda r: -len(r["prefix"]))
     rl = cfg.get("rate_limit", {})
     rps, burst = float(rl.get("rps", 40)), float(rl.get("burst", 80))
