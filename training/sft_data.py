@@ -58,17 +58,19 @@ def main():
     ap.add_argument("--split", default="train")
     ap.add_argument("--variants", default="0-3")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--workers", type=int, default=4)
     a = ap.parse_args()
     lo, hi = (int(x) for x in a.variants.split("-"))
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
+    import concurrent.futures as cf
+
+    jobs = [(fam, v) for fam, v in task_list(a.split, variants=hi + 1) if v >= lo]
     n = 0
-    with open(a.out, "w") as f:
-        for fam, v in task_list(a.split, variants=hi + 1):
-            if v < lo:
-                continue
-            row = play(fam, v)
+    with open(a.out, "w") as f, cf.ThreadPoolExecutor(a.workers) as ex:
+        for row in ex.map(lambda j: play(*j), jobs):
             if row:
                 f.write(json.dumps(row) + "\n")
+                f.flush()
                 n += 1
     print(f"wrote {n} rows to {a.out}")
 

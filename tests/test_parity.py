@@ -30,6 +30,8 @@ def test_trl_delegate_forwards_args():
     calls = []
 
     class FakeEpisode:
+        done = False
+
         def call_tool(self, name, args):
             calls.append((name, args))
             return "ok"
