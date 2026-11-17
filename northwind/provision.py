@@ -129,8 +129,9 @@ STOCK_ON_HAND = 5000
 
 
 def tls_material(cache_dir: str | None = None) -> str:
-    """Self-signed CA + auth server cert, generated once per machine with openssl."""
-    cache_dir = cache_dir or os.path.join(os.path.expanduser("~"), ".cache", "oncallgym", "tls")
+    """Self-signed CA + auth server cert, generated once per machine with openssl.
+    Extensions satisfy Python 3.13's VERIFY_X509_STRICT."""
+    cache_dir = cache_dir or os.path.join(os.path.expanduser("~"), ".cache", "oncallgym", "tls-v2")
     if os.path.exists(os.path.join(cache_dir, "auth.pem")):
         return cache_dir
     os.makedirs(cache_dir, exist_ok=True)
@@ -139,6 +140,22 @@ def tls_material(cache_dir: str | None = None) -> str:
     def run(*args):
         subprocess.run(["openssl", *args], cwd=tmp, check=True, capture_output=True, timeout=60)
 
+    with open(os.path.join(tmp, "ca.ext"), "w") as f:
+        f.write(
+            "[req]\ndistinguished_name=dn\n[dn]\n[v3_ca]\n"
+            "basicConstraints=critical,CA:TRUE\n"
+            "keyUsage=critical,keyCertSign,cRLSign\n"
+            "subjectKeyIdentifier=hash\n"
+        )
+    with open(os.path.join(tmp, "leaf.ext"), "w") as f:
+        f.write(
+            "basicConstraints=critical,CA:FALSE\n"
+            "keyUsage=critical,digitalSignature,keyEncipherment\n"
+            "extendedKeyUsage=serverAuth\n"
+            "subjectKeyIdentifier=hash\n"
+            "authorityKeyIdentifier=keyid,issuer\n"
+            "subjectAltName=IP:127.0.0.1,DNS:localhost\n"
+        )
     run(
         "req",
         "-x509",
@@ -153,6 +170,10 @@ def tls_material(cache_dir: str | None = None) -> str:
         "3650",
         "-subj",
         "/CN=northwind-internal-ca",
+        "-config",
+        "ca.ext",
+        "-extensions",
+        "v3_ca",
     )
     run(
         "req",
@@ -166,8 +187,6 @@ def tls_material(cache_dir: str | None = None) -> str:
         "-subj",
         "/CN=auth.northwind.internal",
     )
-    with open(os.path.join(tmp, "san.ext"), "w") as f:
-        f.write("subjectAltName=IP:127.0.0.1,DNS:localhost\nbasicConstraints=CA:FALSE\n")
     run(
         "x509",
         "-req",
@@ -183,7 +202,7 @@ def tls_material(cache_dir: str | None = None) -> str:
         "-days",
         "3650",
         "-extfile",
-        "san.ext",
+        "leaf.ext",
     )
     for f in ("ca.pem", "auth.key", "auth.pem"):
         os.replace(os.path.join(tmp, f), os.path.join(cache_dir, f))
