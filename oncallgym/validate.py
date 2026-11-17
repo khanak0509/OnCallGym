@@ -58,9 +58,14 @@ def _healthy_then_broken(family, variant, seed):
         fault.inject(s)
         time.sleep(fault.settle_s)
         broken = Probe(s).run(journeys=1, window_s=6)
+    from .probes import LIVENESS_INVARIANTS
+
     parts = {
         "journeys": not all(j["ok"] for j in broken["journeys"]),
         "window": not broken["recovery_window"]["ok"],
+        "liveness": not all(
+            v["ok"] for k, v in broken["invariants"].items() if k in LIVENESS_INVARIANTS
+        ),
     }
     c2 = {
         "ok": all(parts[p] for p in fault.breaks if p in parts),

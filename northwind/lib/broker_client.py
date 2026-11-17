@@ -50,10 +50,9 @@ class Consumer:
         svc.ready_checks.append(lambda: (self.subscribed, f"not subscribed to {queue}"))
 
     def subscribe(self):
-        for t in self.topics:
-            r = self.up.post("/subscribe", {"queue": self.queue, "topic": t})
-            if not r.ok:
-                raise UpstreamError("broker", f"http_{r.status}")
+        r = self.up.post("/subscribe", {"queue": self.queue, "topics": self.topics})
+        if not r.ok:
+            raise UpstreamError("broker", f"http_{r.status}")
         if not self.subscribed:
             self.svc.log.info("subscribed", queue=self.queue, topics=",".join(self.topics))
         self.subscribed = True

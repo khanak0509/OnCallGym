@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 from ..stack import http_json
 from .base import (
@@ -164,6 +165,9 @@ class CatalogLeakFlag(Fault):
     breaks = ("window",)  # intermittent: a single journey may slip through between OOM kills
     settle_s = 25.0
 
+    # the leak is in catalog, the switch that enables it is a flag served by flags
+    also_accepted = ("flags",)
+
     def choose_params(self, rng):
         return {"flag": "recommendations_v2", "leak_kb": rng.choice([3072, 4096, 6144])}
 
@@ -206,6 +210,9 @@ class JwtKeyRotationMismatch(Fault):
     spec_number = 14
     category = "auth"
     tier = "easy"
+
+    # rolling auth back to the old key is also a valid fix
+    also_accepted = ("auth",)
 
     def choose_params(self, rng):
         return {
@@ -260,6 +267,9 @@ class PoisonMessage(Fault):
     tier = "medium"
     settle_s = 4.0
 
+    # the message sits in the broker queue that fulfillment consumes
+    also_accepted = ("broker",)
+
     def choose_params(self, rng):
         shape = rng.choice(["camel_case", "missing_order_id", "null_order_id"])
         ref = "ord_" + rng.randbytes(6).hex()
@@ -310,9 +320,247 @@ class PoisonMessage(Fault):
         assert st == 200, body
 
 
+class WrongDatabasePath(Fault):
+    """Spec 1. A config change points one service at a database file that does not exist;
+    SQLite silently creates an empty one, so every query fails with "no such table"."""
+
+    family = "wrong_database_path"
+    spec_number = 1
+    category = "config"
+    tier = "easy"
+
+    def choose_params(self, rng):
+        service = rng.choice(["inventory", "payments", "catalog"])
+        db = {"inventory": "inventory", "payments": "payments", "catalog": "catalog"}[service]
+        wrong = rng.choice([f"data/{db}-new.db", f"data/{db}s.db", f"/var/lib/northwind/{db}.db"])
+        return {"service": service, "db": db, "wrong": wrong}
+
+    @property
+    def component(self):
+        return self.params["service"]
+
+    def describe(self):
+        p = self.params
+        return f"etc/{p['service']}.yaml db.path is {p['wrong']} instead of data/{p['db']}.db"
+
+    def alert(self):
+        what = {"inventory": "Checkout", "payments": "Checkout", "catalog": "Product browsing"}
+        return f"{what[self.params['service']]} failing with 5xx errors for all customers."
+
+    def inject(self, stack):
+        wrong = self.params["wrong"]
+        if wrong.startswith("/var/lib"):
+            # absolute path into a directory that does not exist inside the episode
+            wrong = "data/missing-volume/" + os.path.basename(wrong)
+            self.params["wrong"] = wrong
+        edit_service_config(stack, self.params["service"], lambda d: d["db"].update(path=wrong))
+        restart_and_wait(stack, self.params["service"], timeout_s=8)
+
+    def oracle(self, stack):
+        db = self.params["db"]
+        edit_service_config(
+            stack, self.params["service"], lambda d: d["db"].update(path=f"data/{db}.db")
+        )
+        restart_and_wait(stack, self.params["service"])
+
+
+class EdgeRateLimitTooLow(Fault):
+    """Spec 3. A rate-limit change at the edge set the per-client limit to almost zero;
+    most requests get 429."""
+
+    family = "edge_rate_limit_too_low"
+    spec_number = 3
+    category = "config"
+    tier = "easy"
+
+    def choose_params(self, rng):
+        return {"rps": rng.choice([0.05, 0.1, 0.2]), "burst": 1}
+
+    @property
+    def component(self):
+        return "edge"
+
+    def describe(self):
+        return f"etc/edge.yaml rate_limit.rps={self.params['rps']} burst=1 (normally 20/40)"
+
+    def alert(self):
+        return "Customers getting 'Too Many Requests' (429) on most pages."
+
+    def inject(self, stack):
+        edit_service_config(
+            stack,
+            "edge",
+            lambda d: d.update(
+                rate_limit={"rps": self.params["rps"], "burst": self.params["burst"]}
+            ),
+        )
+        restart_and_wait(stack, "edge")
+
+    def oracle(self, stack):
+        edit_service_config(stack, "edge", lambda d: d.update(rate_limit={"rps": 20, "burst": 40}))
+        restart_and_wait(stack, "edge")
+
+
+class FulfillmentWrongTopic(Fault):
+    """Spec 4. fulfillment was redeployed subscribed to a misspelled topic, so its queue no
+    longer receives order.paid events and nothing ships. Fixing the topic is not enough: the
+    events published meanwhile must be backfilled into the queue."""
+
+    family = "fulfillment_wrong_topic"
+    spec_number = 4
+    category = "config"
+    tier = "medium"
+    settle_s = 5.0
+
+    def choose_params(self, rng):
+        return {"topic": rng.choice(["order.payed", "orders.paid", "order_paid"])}
+
+    @property
+    def component(self):
+        return "fulfillment"
+
+    def describe(self):
+        return (
+            f"etc/fulfillment.yaml consumer.topic is {self.params['topic']} instead of "
+            "order.paid; events published meanwhile are missing from the queue"
+        )
+
+    def alert(self):
+        return "Orders are paid but none have shipped for several minutes."
+
+    def inject(self, stack):
+        self.injected_at = time.time()
+        edit_service_config(
+            stack, "fulfillment", lambda d: d["consumer"].update(topic=self.params["topic"])
+        )
+        restart_and_wait(stack, "fulfillment")
+
+    def oracle(self, stack):
+        edit_service_config(
+            stack, "fulfillment", lambda d: d["consumer"].update(topic="order.paid")
+        )
+        restart_and_wait(stack, "fulfillment")
+        st, body = http_json(
+            stack.ports["broker"],
+            "POST",
+            "/queues/fulfillment.order-paid/backfill",
+            {"topic": "order.paid", "since_s": 3600},
+        )
+        assert st == 200, body
+
+
+class PaymentsBreakerStuckOpen(Fault):
+    """Spec 9. The provider has elevated (but retryable) errors. payments' circuit breaker
+    was set to open on a single failure and stay open for minutes, so it trips almost
+    immediately and checkout fails fast with 503 although the provider mostly works."""
+
+    family = "payments_breaker_stuck_open"
+    spec_number = 9
+    category = "resilience_config"
+    tier = "medium"
+    breaks = ("window",)  # checkouts fail once the first provider error trips the breaker
+    settle_s = 15.0
+
+    def choose_params(self, rng):
+        return {
+            "error_rate": rng.choice([0.12, 0.15, 0.2]),
+            "reset_timeout_s": rng.choice([300, 600, 900]),
+        }
+
+    @property
+    def component(self):
+        return "payments"
+
+    def describe(self):
+        return (
+            f"etc/payments.yaml breaker failure_threshold=1, reset_timeout_s="
+            f"{self.params['reset_timeout_s']} with provider error rate "
+            f"{self.params['error_rate']}: breaker stays open"
+        )
+
+    def alert(self):
+        return "Checkout failing for most customers (502/503); payment provider status is green."
+
+    def inject(self, stack):
+        p = self.params
+        edit_service_config(stack, "provider", lambda d: d.update(error_rate=p["error_rate"]))
+
+        def payments(doc):
+            doc["upstreams"]["provider"]["breaker"] = {
+                "failure_threshold": 1,
+                "window_s": 60,
+                "reset_timeout_s": p["reset_timeout_s"],
+            }
+
+        edit_service_config(stack, "payments", payments)
+        restart_and_wait(stack, "provider")
+        restart_and_wait(stack, "payments")
+
+    def oracle(self, stack):
+        def payments(doc):
+            doc["upstreams"]["provider"]["breaker"] = {
+                "failure_threshold": 8,
+                "window_s": 10,
+                "reset_timeout_s": 5,
+            }
+
+        edit_service_config(stack, "payments", payments)
+        restart_and_wait(stack, "payments")
+
+
+class NotifyDeadLetters(Fault):
+    """Spec 19. The email relay is flaky by nature and notify relies on redelivery. The
+    notify.events queue was changed to max_redeliveries 0, so every relay hiccup sends the
+    event straight to the dead-letter queue and those customers never get their email."""
+
+    family = "notify_dead_letters"
+    spec_number = 19
+    category = "data"
+    tier = "medium"
+    breaks = ("liveness",)  # dead-lettered emails for real orders
+    settle_s = 15.0
+
+    def choose_params(self, rng):
+        return {"max_redeliveries": 0}
+
+    @property
+    def component(self):
+        return "broker"
+
+    def describe(self):
+        return (
+            "etc/broker.yaml queues.notify.events.max_redeliveries=0: transient relay "
+            "errors dead-letter emails"
+        )
+
+    def alert(self):
+        return "Customers report missing order confirmation and shipping emails."
+
+    def inject(self, stack):
+        def broker(doc):
+            doc["queues"]["notify.events"] = {"max_redeliveries": 0}
+
+        edit_service_config(stack, "broker", broker)
+        restart_and_wait(stack, "broker")
+
+    def oracle(self, stack):
+        def broker(doc):
+            doc["queues"]["notify.events"] = {}
+
+        edit_service_config(stack, "broker", broker)
+        restart_and_wait(stack, "broker")
+        st, body = http_json(stack.ports["broker"], "POST", "/queues/notify.events/dlq/replay")
+        assert st == 200, body
+
+
 FAMILIES = {
     cls.family: cls
     for cls in (
+        WrongDatabasePath,
+        EdgeRateLimitTooLow,
+        FulfillmentWrongTopic,
+        PaymentsBreakerStuckOpen,
+        NotifyDeadLetters,
         EdgeWrongUpstreamPort,
         OrdersPaymentsTimeoutInversion,
         CatalogLeakFlag,

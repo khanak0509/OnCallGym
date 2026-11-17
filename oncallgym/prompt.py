@@ -15,12 +15,28 @@ payment provider, the traffic generator or telemetry.
 - You have a limited number of tool calls. submit_diagnosis ends the episode and can be \
 called once.
 
-Root cause categories: {categories}.
-Component is the name of the one service where the root cause lives (as listed by topology)."""
+Root cause categories:
+{categories}
+Component is the name of the one service whose configuration, data or code holds the root \
+cause (as listed by topology), not the service where the symptom shows."""
+
+CATEGORY_HELP = {
+    "config": "a wrong value in a service's configuration (paths, ports, routes, topics, env "
+    "vars, rate limits, outdated config)",
+    "resilience_config": "timeouts, retries, circuit breakers or connection pools tuned wrongly",
+    "resource_exhaustion": "memory, disk or cache capacity running out",
+    "auth": "signing keys, tokens or credentials not matching",
+    "bad_deploy": "a bad build or version flag in a deployed service",
+    "schema": "a database schema that does not match what the code needs",
+    "performance": "slow database queries (e.g. a missing index) or lock contention",
+    "data": "bad data or messages, or message queue settings (dead letters, redelivery)",
+    "dependency_down": "a service that others depend on is unavailable",
+}
 
 
 def system_prompt() -> str:
-    return SYSTEM_PROMPT.format(categories=", ".join(CATEGORIES))
+    cats = "\n".join(f"- {c}: {CATEGORY_HELP[c]}" for c in CATEGORIES)
+    return SYSTEM_PROMPT.format(categories=cats)
 
 
 def task_prompt(alert: str, turn_limit: int) -> str:

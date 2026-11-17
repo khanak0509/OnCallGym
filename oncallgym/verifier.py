@@ -207,7 +207,7 @@ def verify(
 
     if diagnosis:
         cat_ok = diagnosis.get("root_cause_category") == ground_truth.category
-        comp_ok = (diagnosis.get("component") or "").strip().lower() == ground_truth.component
+        comp_ok = ground_truth.component_ok(diagnosis.get("component"))
         b.C = float(cat_ok and comp_ok)
         d["root_cause"] = {"category_ok": cat_ok, "component_ok": comp_ok}
 

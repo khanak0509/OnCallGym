@@ -330,6 +330,7 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
             "notify",
             {},
             outbox_file="data/outbox/emails.jsonl",
+            smtp={"relay": "smtp.mailrelay.example:587", "error_rate": 0.2},
             upstreams={"broker": broker_up},
             consumer={"queue": "notify.events", "topics": ["order.paid", "order.shipped"]},
         ),

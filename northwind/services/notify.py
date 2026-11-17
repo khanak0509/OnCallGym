@@ -5,6 +5,7 @@ Delivery is at-least-once, so the consumer de-duplicates by (topic, order_id).
 
 import json
 import os
+import random
 import threading
 import time
 
@@ -34,8 +35,14 @@ def main():
                 except (ValueError, KeyError):
                     continue
 
+    relay_error_rate = float(cfg.get("smtp", {}).get("error_rate", 0.0))
+    rng = random.Random()
+
     def handle(msg):
         p = msg["payload"]
+        if rng.random() < relay_error_rate:
+            # the external mail relay is flaky; the broker redelivers and we retry
+            raise ConnectionError("smtp relay: 421 service not available, try again later")
         key = (msg["topic"], p["order_id"])
         with lock:
             if key in sent:

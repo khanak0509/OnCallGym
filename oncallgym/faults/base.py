@@ -36,8 +36,15 @@ TIERS = {"easy": 8, "medium": 12, "hard": 16}
 @dataclass(frozen=True)
 class GroundTruth:
     category: str
-    component: str
+    component: str  # primary answer
     description: str
+    # other components that are an equally defensible answer for this fault (documented
+    # per family); the root-cause check accepts any of them
+    also_accepted: tuple[str, ...] = ()
+
+    def component_ok(self, answer: str) -> bool:
+        a = (answer or "").strip().lower()
+        return a == self.component or a in self.also_accepted
 
 
 class Fault:
@@ -62,9 +69,11 @@ class Fault:
     def component(self) -> str:
         raise NotImplementedError
 
+    also_accepted: tuple[str, ...] = ()
+
     @property
     def ground_truth(self) -> GroundTruth:
-        return GroundTruth(self.category, self.component, self.describe())
+        return GroundTruth(self.category, self.component, self.describe(), self.also_accepted)
 
     @property
     def turn_limit(self) -> int:

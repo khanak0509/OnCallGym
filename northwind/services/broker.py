@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS entries (
   PRIMARY KEY (queue, msg_id));
 CREATE INDEX IF NOT EXISTS entries_ready ON entries (queue, state, visible_at, msg_id);
 CREATE TABLE IF NOT EXISTS unrouted (msg_id INTEGER PRIMARY KEY, topic TEXT);
+CREATE TABLE IF NOT EXISTS binding_log (id INTEGER PRIMARY KEY AUTOINCREMENT, queue TEXT NOT NULL,
+  topic TEXT NOT NULL, action TEXT NOT NULL, ts REAL NOT NULL);
 """
 
 
@@ -46,7 +48,13 @@ def main():
     db = connect(svc.path(cfg.get("db", "data/broker.db")), threads=True)
     db.executescript(SCHEMA)
     for b in cfg.get("bindings") or []:
-        db.execute("INSERT OR IGNORE INTO bindings VALUES (?, ?)", (b["queue"], b["topic"]))
+        if db.execute(
+            "INSERT OR IGNORE INTO bindings VALUES (?, ?)", (b["queue"], b["topic"])
+        ).rowcount:
+            db.execute(
+                "INSERT INTO binding_log (queue, topic, action, ts) VALUES (?, ?, 'bind', ?)",
+                (b["queue"], b["topic"], time.time()),
+            )
     lock = threading.Lock()
 
     @contextlib.contextmanager
@@ -118,15 +126,49 @@ def main():
 
     @svc.app.route("POST", "/subscribe")
     def subscribe(req):
+        """Declare a queue's subscriptions: the queue is bound to exactly `topics`
+        (bindings to other topics are removed). Changes are recorded in binding_log."""
         b = req.json
-        require(b.get("queue") and b.get("topic"), 400, "queue and topic required")
-        with lock:
+        topics = b.get("topics") or ([b["topic"]] if b.get("topic") else [])
+        require(b.get("queue") and topics, 400, "queue and topics required")
+        q, now = b["queue"], time.time()
+        with tx():
+            current = {r[0] for r in db.execute("SELECT topic FROM bindings WHERE queue=?", (q,))}
+            for t in set(topics) - current:
+                db.execute("INSERT INTO bindings VALUES (?, ?)", (q, t))
+                db.execute(
+                    "INSERT INTO binding_log (queue, topic, action, ts) VALUES (?, ?, 'bind', ?)",
+                    (q, t, now),
+                )
+                svc.log.info("binding created", queue=q, topic=t)
+            for t in current - set(topics):
+                db.execute("DELETE FROM bindings WHERE queue=? AND topic=?", (q, t))
+                db.execute(
+                    "INSERT INTO binding_log (queue, topic, action, ts) VALUES (?, ?, 'unbind', ?)",
+                    (q, t, now),
+                )
+                svc.log.warn("binding removed", queue=q, topic=t)
+        return 200, {"queue": q, "topics": sorted(topics)}
+
+    @svc.app.route("POST", "/queues/{queue}/backfill")
+    def backfill(req):
+        """Copy already-published messages of `topic` (newer than since_s seconds ago) into
+        the queue if they are not in it yet, e.g. after fixing a wrong subscription."""
+        q = req.params["queue"]
+        topic = req.json.get("topic")
+        require(topic, 400, "topic required")
+        since = time.time() - float(req.json.get("since_s", 3600))
+        now = time.time()
+        with tx():
             cur = db.execute(
-                "INSERT OR IGNORE INTO bindings VALUES (?, ?)", (b["queue"], b["topic"])
+                "INSERT INTO entries (queue, msg_id, state, visible_at, updated_at) "
+                "SELECT ?, m.id, 'ready', 0, ? FROM messages m WHERE m.topic=? AND "
+                "m.published_at>=? AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.queue=? "
+                "AND e.msg_id=m.id)",
+                (q, now, topic, since, q),
             )
-        if cur.rowcount:
-            svc.log.info("binding created", queue=b["queue"], topic=b["topic"])
-        return 200, {"queue": b["queue"], "topic": b["topic"]}
+        svc.log.info("queue backfilled", queue=q, topic=topic, count=cur.rowcount)
+        return 200, {"backfilled": cur.rowcount}
 
     @svc.app.route("POST", "/consume")
     def consume(req):

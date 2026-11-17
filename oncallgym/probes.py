@@ -386,27 +386,44 @@ class Probe:
             # a message is valid if it refers to an order that exists; malformed messages
             # (poison) may be dead-lettered or dropped without counting as lost
             order_ids = {r[0] for r in orders.execute("SELECT id FROM orders")}
+            # which queues a message was routed to is decided by the bindings at publish
+            # time (binding_log), so a message published while a queue was unbound is not
+            # "lost" from it (that shows up as liveness: orders not shipped)
+            changes = {}
+            for r in broker.execute("SELECT queue, topic, action, ts FROM binding_log ORDER BY id"):
+                changes.setdefault(r["topic"], []).append((r["ts"], r["queue"], r["action"]))
+
+            def bound_at(topic, ts):
+                qs = set()
+                for t, q, action in changes.get(topic, []):
+                    if t > ts:
+                        break
+                    (qs.add if action == "bind" else qs.discard)(q)
+                return qs
+
             valid = {}
-            for r in broker.execute("SELECT id, topic, payload FROM messages"):
+            for r in broker.execute("SELECT id, topic, payload, published_at FROM messages"):
                 try:
                     oid = json.loads(r["payload"]).get("order_id")
                 except (ValueError, AttributeError):
                     oid = None
                 if oid in order_ids and r["topic"] in EXPECTED_QUEUES:
-                    valid[r["id"]] = r["topic"]
+                    valid[r["id"]] = bound_at(r["topic"], r["published_at"])
             entries = {}
             for r in broker.execute("SELECT queue, msg_id, state, updated_at FROM entries"):
                 entries[(r["queue"], r["msg_id"])] = (r["state"], r["updated_at"])
             missing, dead, stale = [], [], []
-            for mid, topic in valid.items():
-                for q in EXPECTED_QUEUES[topic]:
-                    e = entries.get((q, mid))
-                    if e is None:
+            for (q, mid), (state, updated) in entries.items():
+                if mid not in valid:
+                    continue
+                if state == "dead":
+                    dead.append({"queue": q, "msg_id": mid})
+                elif state != "acked" and now - updated > grace_s:
+                    stale.append({"queue": q, "msg_id": mid, "state": state})
+            for mid, queues in valid.items():
+                for q in queues:
+                    if (q, mid) not in entries:
                         missing.append({"queue": q, "msg_id": mid})
-                    elif e[0] == "dead":
-                        dead.append({"queue": q, "msg_id": mid})
-                    elif e[0] != "acked" and now - e[1] > grace_s:
-                        stale.append({"queue": q, "msg_id": mid, "state": e[0]})
             short = [t for t, n in n_outbox.items() if n_msgs.get(t, 0) < n]
             res(
                 "no_lost_messages",
