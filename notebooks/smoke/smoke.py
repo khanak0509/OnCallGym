@@ -40,7 +40,8 @@ def main():
     with open("/proc/meminfo") as f:
         summary["mem_total_kb"] = int(f.readline().split()[1])
     rc, out = sh(f"{sys.executable} -m pip install -q pyyaml pytest")
-    rc, out = sh(f"{sys.executable} -m pytest -q tests 2>&1 | tail -15")
+    pytest = f"{sys.executable} -m pytest -q tests --ignore=tests/test_smoke.py"
+    rc, out = sh(f"{pytest} 2>&1 | tail -15")
     summary["pytest"] = out.strip().splitlines()[-1] if out.strip() else ""
     rc, out = sh(f"{sys.executable} -m oncallgym.stack probe")
     try:

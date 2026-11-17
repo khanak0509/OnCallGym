@@ -137,7 +137,7 @@ def tls_material(cache_dir: str | None = None) -> str:
     tmp = tempfile.mkdtemp(dir=cache_dir)
 
     def run(*args):
-        subprocess.run(["openssl", *args], cwd=tmp, check=True, capture_output=True)
+        subprocess.run(["openssl", *args], cwd=tmp, check=True, capture_output=True, timeout=60)
 
     run(
         "req",

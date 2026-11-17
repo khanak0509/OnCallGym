@@ -26,9 +26,11 @@ import tempfile
 import time
 import uuid
 
+import northwind
 from northwind.provision import provision
 from northwind.topology import BLOCK_SIZE
 
+CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(northwind.__file__)))
 BASE_PORT = int(os.environ.get("ONCALLGYM_BASE_PORT", 21000))
 MAX_BLOCKS = 200
 
@@ -121,9 +123,15 @@ class Stack:
             self.create()
         t0 = time.time()
         log = open(os.path.join(self.home, "logs/supervisor.stdout"), "ab")
+        # services run with cwd=home, so make the code importable whether or not it is installed
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [CODE_ROOT] + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
+        )
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "northwind.supervisor", "--home", self.home],
             cwd=self.home,
+            env=env,
             stdout=log,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -134,8 +142,8 @@ class Stack:
         while time.time() < deadline:
             if self.proc.poll() is not None:
                 raise RuntimeError(
-                    f"supervisor exited with {self.proc.returncode}; see "
-                    f"{self.home}/logs/supervisor.stdout"
+                    f"supervisor exited with {self.proc.returncode}:\n"
+                    + self.log_tail("supervisor.stdout")
                 )
             try:
                 st, body = http_json(self.ports["supervisor"], "GET", "/services", timeout=1)
@@ -145,7 +153,18 @@ class Stack:
             except (OSError, http.client.HTTPException, ValueError):
                 pass
             time.sleep(0.2)
-        raise TimeoutError(f"stack not ready after {timeout_s}s: {self.not_ready()}")
+        raise TimeoutError(
+            f"stack not ready after {timeout_s}s: {self.not_ready()}\n"
+            f"supervisor log tail:\n{self.log_tail('supervisor', 15)}"
+        )
+
+    def log_tail(self, name: str, n: int = 20) -> str:
+        fname = name if "." in name else f"{name}.log"
+        try:
+            with open(os.path.join(self.home, "logs", fname), errors="replace") as f:
+                return "".join(f.readlines()[-n:])
+        except OSError as e:
+            return f"(no log: {e})"
 
     def not_ready(self):
         try:
