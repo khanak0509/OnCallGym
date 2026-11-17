@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 from ..stack import http_json
 from .base import (
@@ -1007,9 +1008,352 @@ class NotifyDeadLetters(Fault):
         assert st == 200, body
 
 
+class SchedulerLockHold(Fault):
+    """Spec 20. The reservation-expiry job was changed to hold its write transaction on
+    inventory.db for seconds every few seconds (a "batch window" setting); inventory's own
+    writes then fail with "database is locked" and checkouts fail intermittently."""
+
+    family = "scheduler_lock_hold"
+    spec_number = 20
+    category = "performance"
+    tier = "hard"
+    breaks = ("window",)
+    settle_s = 10.0
+
+    def choose_params(self, rng):
+        return {"hold_s": rng.choice([2.5, 3.0, 4.0]), "interval_s": rng.choice([3, 4])}
+
+    @property
+    def component(self):
+        return "scheduler"
+
+    def describe(self):
+        return (
+            f"etc/scheduler.yaml jobs.expire_reservations.hold_lock_s="
+            f"{self.params['hold_s']} every {self.params['interval_s']}s locks inventory.db"
+        )
+
+    def alert(self):
+        return "Checkout failing intermittently (about half the attempts) with 5xx errors."
+
+    def configure(self, stack):
+        p = self.params
+
+        def fn(doc):
+            doc["jobs"]["expire_reservations"].update(
+                hold_lock_s=p["hold_s"], interval_s=p["interval_s"]
+            )
+
+        edit_service_config(stack, "scheduler", fn)
+
+    def root_cause_fixed(self, stack):
+        job = read_yaml(config_path(stack, "scheduler"))["jobs"]["expire_reservations"]
+        return float(job.get("hold_lock_s", 0)) <= 0.2
+
+    def solution_steps(self, stack):
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "checkout failed"},
+                "Checkouts fail now and then. See why.",
+            ),
+            (
+                "logs",
+                {"service": "inventory", "tail": 5, "grep": "locked"},
+                "inventory errors on reservations. Is its database locked?",
+            ),
+            (
+                "exec",
+                {"command": "grep -n -A4 expire_reservations etc/scheduler.yaml"},
+                "Something holds a lock on inventory.db. The scheduler writes to it directly.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/hold_lock_s: .*/hold_lock_s: 0/' etc/scheduler.yaml"
+                    " && grep -n -A4 expire_reservations etc/scheduler.yaml"
+                },
+                f"expire_reservations holds its lock {self.params['hold_s']} s every "
+                f"{self.params['interval_s']} s. Remove the hold.",
+            ),
+            ("restart", {"service": "scheduler"}, "Restart the scheduler."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "performance",
+                    "component": "scheduler",
+                    "summary": "scheduler expire_reservations held a long write "
+                    "lock on inventory.db; removed hold_lock_s.",
+                },
+                "Checkouts succeed. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        edit_service_config(
+            stack, "scheduler", lambda d: d["jobs"]["expire_reservations"].update(hold_lock_s=0)
+        )
+        restart_and_wait(stack, "scheduler")
+
+
+class CatalogBadBuildFlag(Fault):
+    """Spec 15. catalog was deployed with build flag search_v2 on; the v2 search query needs
+    a table that only exists from catalog 2.8, so every search returns 500."""
+
+    family = "catalog_bad_build_flag"
+    spec_number = 15
+    category = "bad_deploy"
+    tier = "easy"
+
+    def choose_params(self, rng):
+        return {"version": rng.choice(["2.7.2", "2.7.3"])}
+
+    @property
+    def component(self):
+        return "catalog"
+
+    def describe(self):
+        return "etc/catalog.yaml build.flags.search_v2=true needs product_tags (not deployed)"
+
+    def alert(self):
+        return "Product search returns errors for every query since the last catalog deploy."
+
+    def configure(self, stack):
+        def fn(doc):
+            doc["build"] = {"version": self.params["version"], "flags": {"search_v2": True}}
+
+        edit_service_config(stack, "catalog", fn)
+
+    def root_cause_fixed(self, stack):
+        flags = read_yaml(config_path(stack, "catalog")).get("build", {}).get("flags") or {}
+        return not flags.get("search_v2")
+
+    def solution_steps(self, stack):
+        return [
+            (
+                "logs",
+                {"service": "catalog", "tail": 5, "grep": "error"},
+                "Search fails. Check catalog's errors.",
+            ),
+            (
+                "exec",
+                {"command": "grep -n -A4 '^build:' etc/catalog.yaml"},
+                "The search query hits a missing table. Check catalog's build flags.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/search_v2: true/search_v2: false/' etc/catalog.yaml"
+                    " && grep -n -A4 '^build:' etc/catalog.yaml"
+                },
+                "search_v2 is on but its table does not exist yet. Roll the flag back.",
+            ),
+            ("restart", {"service": "catalog"}, "Restart catalog."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "bad_deploy",
+                    "component": "catalog",
+                    "summary": "catalog deployed with build flag search_v2, which "
+                    "needs a missing table; rolled the flag back.",
+                },
+                "Search works. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        edit_service_config(stack, "catalog", lambda d: d["build"]["flags"].update(search_v2=False))
+        restart_and_wait(stack, "catalog")
+
+
+class FlagsServiceDown(Fault):
+    """Spec 21. A bad edit left etc/feature-flags.yaml unparsable; the flags service crashes
+    on start and keeps restarting. orders, which never got its flags, falls back to its local
+    default checkout_mode=maintenance and rejects every checkout (symptom far from cause)."""
+
+    family = "flags_service_down"
+    spec_number = 21
+    category = "dependency_down"
+    tier = "hard"
+    breaks = ("journeys",)
+    settle_s = 6.0
+
+    def choose_params(self, rng):
+        return {"breakage": rng.choice(["tab", "unclosed_list", "bad_indent"])}
+
+    @property
+    def component(self):
+        return "flags"
+
+    def describe(self):
+        return "etc/feature-flags.yaml is not valid YAML; flags crash-loops; orders fails closed"
+
+    def alert(self):
+        return "All checkouts rejected with 503 'checkout temporarily disabled'."
+
+    def configure(self, stack):
+        path = config_path(stack, "feature-flags")
+        with open(path) as f:
+            text = f.read()
+        b = self.params["breakage"]
+        if b == "tab":
+            text = text.replace("  catalog:", "\tcatalog:", 1)
+        elif b == "unclosed_list":
+            text = text.replace("- kitchen", "[kitchen", 1)
+        else:
+            text = text.replace("  orders:", "     orders:", 1)
+        with open(path, "w") as f:
+            f.write(text)
+
+    def root_cause_fixed(self, stack):
+        import yaml
+
+        try:
+            doc = read_yaml(config_path(stack, "feature-flags"))
+        except yaml.YAMLError:
+            return False
+        orders = (doc.get("services") or {}).get("orders") or {}
+        return orders.get("checkout_mode") == "on"
+
+    def solution_steps(self, stack):
+        b = self.params["breakage"]
+        fix = {
+            "tab": "sed -i 's/^\\tcatalog:/  catalog:/' etc/feature-flags.yaml",
+            "unclosed_list": "sed -i 's/\\[kitchen/- kitchen/' etc/feature-flags.yaml",
+            "bad_indent": "sed -i 's/^     orders:/  orders:/' etc/feature-flags.yaml",
+        }[b]
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "checkout"},
+                "Checkouts are rejected. See what orders says.",
+            ),
+            ("list_services", {}, "orders runs in maintenance mode. Is the flags service up?"),
+            (
+                "exec",
+                {"command": "tail -5 logs/flags.stdout; cat -A etc/feature-flags.yaml | head -20"},
+                "flags keeps crashing. Check its error and its file.",
+            ),
+            (
+                "exec",
+                {"command": f"{fix} && cat etc/feature-flags.yaml"},
+                "The flags file is not valid YAML. Repair it.",
+            ),
+            ("restart", {"service": "flags"}, "Restart flags; orders will pick up its flags."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "dependency_down",
+                    "component": "flags",
+                    "summary": "feature-flags.yaml was invalid so flags crash-"
+                    "looped and orders fell back to maintenance; "
+                    "repaired the file.",
+                },
+                "Checkouts work again. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        import yaml
+
+        from northwind.provision import FLAGS
+
+        with open(config_path(stack, "feature-flags"), "w") as f:
+            yaml.safe_dump(FLAGS, f, sort_keys=False)
+        restart_and_wait(stack, "flags")
+        time.sleep(3)  # orders polls flags every 2 s
+
+
+class MissingMigration(Fault):
+    """Spec 16. orders was deployed with code that writes the new column orders.channel, but
+    migration 3 was not applied (rolled back by a failed deploy); every checkout fails on
+    insert although orders reports ready."""
+
+    family = "missing_migration"
+    spec_number = 16
+    category = "schema"
+    tier = "medium"
+
+    def choose_params(self, rng):
+        return {}
+
+    @property
+    def component(self):
+        return "orders"
+
+    def describe(self):
+        return "orders.db is missing migration 3 (column channel) that orders code writes"
+
+    def alert(self):
+        return "Every checkout fails with 500; browsing works."
+
+    def configure(self, stack):
+        import sqlite3
+
+        c = sqlite3.connect(os.path.join(stack.home, "data/orders.db"), isolation_level=None)
+        try:
+            c.execute("ALTER TABLE orders DROP COLUMN channel")
+            c.execute("DELETE FROM schema_migrations WHERE version=3")
+        finally:
+            c.close()
+
+    def root_cause_fixed(self, stack):
+        import sqlite3
+
+        c = sqlite3.connect(f"file:{stack.home}/data/orders.db?mode=ro", uri=True)
+        try:
+            cols = {r[1] for r in c.execute("PRAGMA table_info(orders)")}
+        finally:
+            c.close()
+        return "channel" in cols
+
+    def solution_steps(self, stack):
+        o = stack.ports["orders"]
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "error"},
+                "Checkouts fail with 500. Check orders' errors.",
+            ),
+            (
+                "exec",
+                {"command": f"curl -s http://127.0.0.1:{o}/admin/migrations"},
+                "The insert references a column that does not exist. Check schema migrations.",
+            ),
+            (
+                "exec",
+                {"command": f"curl -s -X POST http://127.0.0.1:{o}/admin/migrations/apply"},
+                "Migration 3 is pending. Apply it.",
+            ),
+            (
+                "logs",
+                {"service": "orders", "tail": 3, "grep": "checkout completed"},
+                "Check that checkouts complete.",
+            ),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "schema",
+                    "component": "orders",
+                    "summary": "orders.db was missing migration 3 (channel "
+                    "column) the code writes; applied it.",
+                },
+                "Checkouts work. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        st, body = http_json(stack.ports["orders"], "POST", "/admin/migrations/apply")
+        assert st == 200, body
+
+
 FAMILIES = {
     cls.family: cls
     for cls in (
+        SchedulerLockHold,
+        CatalogBadBuildFlag,
+        FlagsServiceDown,
+        MissingMigration,
         WrongDatabasePath,
         EdgeRateLimitTooLow,
         FulfillmentWrongTopic,

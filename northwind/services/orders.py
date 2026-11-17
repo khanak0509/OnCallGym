@@ -17,7 +17,7 @@ from northwind.lib.service import Service, require
 
 def main():
     svc = Service("orders")
-    svc.use_flags()
+    svc.use_flags()  # local default checkout_mode=maintenance (fail closed without flags)
     db = svc.database("orders")
     auth = svc.upstream("auth")
     catalog = svc.upstream("catalog")
@@ -69,6 +69,13 @@ def main():
 
     @svc.app.route("POST", "/checkout")
     def checkout(req):
+        if svc.flag("checkout_mode", "maintenance") != "on":
+            svc.log.warn(
+                "checkout rejected: checkout_mode is not on",
+                req=req.request_id,
+                flags_source=svc.flags.source,
+            )
+            return 503, {"error": "checkout temporarily disabled"}
         claims = claims_from(req)
         rid = req.request_id
         items = req.json.get("items") or []
@@ -115,9 +122,19 @@ def main():
             with db.tx() as c:
                 c.execute(
                     "INSERT INTO orders (id, user_id, email, status, total_cents, "
-                    "idempotency_key, created_at, updated_at, shipping_address) VALUES "
-                    "(?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
-                    (order_id, user["id"], user["email"], total, key, now, now, user["address"]),
+                    "idempotency_key, created_at, updated_at, shipping_address, channel) VALUES "
+                    "(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+                    (
+                        order_id,
+                        user["id"],
+                        user["email"],
+                        total,
+                        key,
+                        now,
+                        now,
+                        user["address"],
+                        req.headers.get("X-Channel", "web")[:16],
+                    ),
                 )
                 c.executemany(
                     "INSERT INTO order_items VALUES (?, ?, ?, ?)",
@@ -251,6 +268,30 @@ def main():
             set_status(oid, "failed", reason="abandoned: checkout did not complete")
             call(inventory, "POST", f"/reservations/{oid}/release")
         return 200, {"order_id": oid}
+
+    @svc.app.route("GET", "/admin/migrations")
+    def migrations(req):
+        """Operator endpoint: schema migrations applied and pending for orders.db."""
+        from northwind import schema
+
+        with db.conn() as c:
+            applied = [r[0] for r in c.execute("SELECT version FROM schema_migrations")]
+            return 200, {"applied": sorted(applied), "pending": schema.pending(c, "orders")}
+
+    @svc.app.route("POST", "/admin/migrations/apply")
+    def apply_migrations(req):
+        """Operator endpoint: apply pending schema migrations (normally a deploy step)."""
+        from northwind import schema
+        from northwind.lib.db import connect
+
+        c = connect(db.path)
+        try:
+            before = schema.pending(c, "orders")
+            schema.migrate(c, "orders")
+        finally:
+            c.close()
+        svc.log.info("schema migrations applied", versions=",".join(map(str, before)))
+        return 200, {"applied": before}
 
     @svc.app.route("GET", "/orders", internal=True)
     def list_orders(req):

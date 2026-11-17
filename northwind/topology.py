@@ -4,7 +4,15 @@ BLOCK_SIZE = 20
 
 # name: (port offset, start layer, depends on, role)
 SERVICES = {
-    "broker": (10, 0, [], "message broker: topics, queues, acks, redelivery, dead-letter queues"),
+    "broker": (
+        10,
+        0,
+        [],
+        "message broker: topics, queues, acks, redelivery, dead-letter queues. "
+        "Admin: GET /queues, GET /queues/<q>/messages, GET /queues/<q>/dlq, "
+        "POST /queues/<q>/dlq/replay, POST /queues/<q>/backfill, "
+        "POST /queues/<q>/messages/<id>/dead-letter",
+    ),
     "cache": (11, 0, [], "key-value cache with memory budget and eviction policy"),
     "flags": (12, 0, [], "central config and feature flags; services poll it"),
     "provider": (7, 0, [], "external payment provider (third party, not ours to change)"),
@@ -21,7 +29,8 @@ SERVICES = {
         5,
         2,
         ["auth", "catalog", "inventory", "payments", "broker", "flags"],
-        "checkout orchestration; transactional outbox to broker",
+        "checkout orchestration; transactional outbox to broker. Admin: GET /admin/migrations, "
+        "POST /admin/migrations/apply",
     ),
     "fulfillment": (8, 3, ["broker", "orders", "flags"], "consumes order.paid, creates shipments"),
     "notify": (9, 3, ["broker", "flags"], "consumes order events, writes customer emails"),

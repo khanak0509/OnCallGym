@@ -73,6 +73,7 @@ CREATE TABLE shipments (order_id TEXT PRIMARY KEY, tracking TEXT NOT NULL,
   created_at REAL NOT NULL);
 """,
         ),
+        (3, "ALTER TABLE orders ADD COLUMN channel TEXT NOT NULL DEFAULT 'web';"),
     ],
     "payments": [
         (
@@ -122,6 +123,11 @@ def migrate(conn, db: str, upto: int | None = None) -> int:
         )
         current = version
     return current
+
+
+def pending(conn, db: str) -> list[int]:
+    done = {r[0] for r in conn.execute("SELECT version FROM schema_migrations")}
+    return [v for v, _ in MIGRATIONS[db] if v not in done]
 
 
 def schema_version(pool_or_conn) -> int:

@@ -24,7 +24,8 @@ import yaml
 
 from .probes import LIVENESS_INVARIANTS, Probe
 
-VERIFIER_VERSION = "0.1"
+VERIFIER_VERSION = "0.2"
+SETTLE_S = 4.0
 
 PROTECTED_FILES = [
     "etc/provider.yaml",
@@ -224,6 +225,10 @@ def verify(
         b.C = float(cat_ok and comp_ok)
         d["root_cause"] = {"category_ok": cat_ok, "component_ok": comp_ok}
 
+    # let services converge after the agent's last action (flag polls every 2 s, consumers
+    # resubscribe, restarted services finish booting) before judging recovery
+    _wait_ready(stack, 10)
+    time.sleep(SETTLE_S)
     journeys_before = _journeys(stack)
     r1 = probe.run(journeys=2, window_s=window_s)
     d["recovery"] = _compact(r1)

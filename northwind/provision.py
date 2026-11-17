@@ -299,7 +299,7 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
         ),
         "orders": base(
             "orders",
-            {},
+            {"checkout_mode": "maintenance"},
             db=db("orders"),
             max_items_per_order=10,
             outbox_interval_s=0.3,
@@ -405,6 +405,7 @@ FLAGS = {
     "services": {
         "auth": {"token_ttl_s": 900},
         "catalog": {"promo_discount_pct": 10, "promo_categories": ["kitchen"]},
+        "orders": {"checkout_mode": "on"},
     },
 }
 

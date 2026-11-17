@@ -109,11 +109,19 @@ def main():
         q = (req.arg("q") or "").strip().lower()
         require(q, 400, "missing q")
         require(len(q) <= 64, 400, "query too long")
-        rows = db.query(
-            f"SELECT {cols} FROM products WHERE active=1 AND "
-            "(lower(name) LIKE ? OR lower(description) LIKE ?) ORDER BY sku LIMIT 20",
-            (f"%{q}%", f"%{q}%"),
-        )
+        if svc.build_flags.get("search_v2"):
+            # v2 ranks by tag matches; it expects the product_tags table from catalog 2.8
+            rows = db.query(
+                f"SELECT {cols} FROM products p JOIN product_tags t ON t.sku=p.sku WHERE "
+                "p.active=1 AND t.tag LIKE ? GROUP BY p.sku ORDER BY COUNT(*) DESC LIMIT 20",
+                (f"%{q}%",),
+            )
+        else:
+            rows = db.query(
+                f"SELECT {cols} FROM products WHERE active=1 AND "
+                "(lower(name) LIKE ? OR lower(description) LIKE ?) ORDER BY sku LIMIT 20",
+                (f"%{q}%", f"%{q}%"),
+            )
         return 200, {"q": q, "results": [price(p) for p in rows]}
 
     svc.run()

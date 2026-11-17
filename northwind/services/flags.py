@@ -38,6 +38,10 @@ def main():
         svc.log.info("flags loaded", services=len(data.get("services", {}) or {}))
 
     load()
+    if state["error"] is not None or state["mtime"] is None:
+        # nothing valid to serve: crash (the supervisor restarts us with backoff)
+        svc.log.error("cannot start without a valid flags file", error=state["error"])
+        raise SystemExit(1)
     svc.ready_checks.append(lambda: (state["error"] is None, state["error"]))
 
     @svc.app.route("GET", "/flags/{service}")
