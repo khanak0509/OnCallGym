@@ -31,7 +31,7 @@ CATEGORIES = (
     "data",
     "dependency_down",
 )
-TIERS = {"easy": 8, "medium": 12, "hard": 16}
+TIERS = {"easy": 12, "medium": 14, "hard": 16}
 
 
 @dataclass(frozen=True)

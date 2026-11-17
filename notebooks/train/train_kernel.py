@@ -41,6 +41,72 @@ def sh(cmd, log, timeout=7200, env=None):
     return p.returncode, round(time.time() - t0)
 
 
+def wait_up(port, proc, tries=240):
+    for _ in range(tries):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2)
+            return True
+        except Exception:
+            if proc.poll() is not None:
+                return False
+            time.sleep(5)
+    return False
+
+
+def run_gate(s, gate, py, env):
+    """pass@k of base and SFT models on easy train tasks with the shared-loop evaluator.
+    GRPO only starts if the SFT model's per-sample solve rate is within the band."""
+    log = open(WORK / "vllm_gate.log", "w")
+    cmd = [
+        f"{VENV}/bin/vllm",
+        "serve",
+        s["model"],
+        "--port",
+        "8100",
+        "--dtype",
+        "float16",
+        "--max-model-len",
+        "8192",
+        "--gpu-memory-utilization",
+        "0.85",
+        "--enable-lora",
+        "--max-lora-rank",
+        "16",
+        "--lora-modules",
+        f"sft={WORK}/sft/adapter",
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        env={**env, "CUDA_VISIBLE_DEVICES": "1"},
+    )
+    out = {"up": wait_up(8100, proc)}
+    if not out["up"]:
+        return out
+    for name in ("sft", s["model"]) if gate.get("base", True) else ("sft",):
+        tag = "sft" if name == "sft" else "base"
+        rc, secs = sh(
+            f"{py} -m oncallgym.evaluate --base-url http://127.0.0.1:8100 "
+            f"--backend vllm --model {name} --tokenizer {s['model']} "
+            f"--split {gate.get('split', 'train')} --tiers {gate.get('tiers', 'easy')} "
+            f"--variants {gate.get('variants', '0-3')} --samples {gate.get('samples', 8)} "
+            f"--parallel 8 --out {WORK}/gate_{tag}",
+            f"gate_{tag}.log",
+            env={**env, "PYTHONPATH": str(SRC)},
+        )
+        try:
+            out[tag] = json.loads((WORK / f"gate_{tag}" / "meta.json").read_text())
+        except OSError:
+            out[tag] = {"rc": rc}
+    proc.terminate()
+    rate = out.get("sft", {}).get("solve_rate", 0.0)
+    lo, hi = gate.get("band", [0.10, 0.40])
+    out["go"] = bool(lo <= rate <= hi) or bool(gate.get("force"))
+    return out
+
+
 def main():
     WORK.mkdir(parents=True, exist_ok=True)
     SRC.mkdir(parents=True, exist_ok=True)
@@ -78,6 +144,13 @@ def main():
         summary["stages"]["sft"] = {"rc": rc, "s": secs}
         save()
         if rc:
+            return
+    gate = s.get("gate")
+    if gate:
+        passed = run_gate(s, gate, py, env)
+        summary["stages"]["gate"] = passed
+        save()
+        if not passed.get("go"):
             return
     if not s.get("grpo_steps"):
         return

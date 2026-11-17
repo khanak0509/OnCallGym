@@ -345,16 +345,33 @@ class Episode:
         return self.termination is not None
 
     def note_model_turn(self, text: str):
-        """Adapters report each model turn so the token budget includes it."""
+        """The agent loop reports each model turn: its real size is charged to the budget
+        (then the fixed per-call allowance is not added on top)."""
+        self._sees_model_text = True
         self.tokens_used += self.count_tokens(text)
         self._log("model", text=text)
+
+    def nudge(self) -> str:
+        """The model replied without calling a tool: tell it to continue. Counts as a turn
+        and is charged to the budget, exactly like a tool call."""
+        from .loop import NUDGE
+
+        if self.done:
+            return f"episode is over ({self.termination})"
+        self.turns += 1
+        return self._deliver("__nudge__", {}, NUDGE)
 
     def call_tool(self, name: str, args: dict | None = None) -> str:
         args = args or {}
         if self.done:
             return f"episode is over ({self.termination})"
         self.turns += 1  # invalid calls count too, so they cannot be spammed for free
-        if name not in TOOL_NAMES:
+        if name == "__invalid__":
+            out = (
+                f"{args.get('error', 'invalid tool call')}. Write calls as <tool_call>"
+                '{"name": ..., "arguments": {...}}</tool_call>.'
+            )
+        elif name not in TOOL_NAMES:
             out = f"unknown tool {name!r}; available: {', '.join(TOOL_NAMES)}"
         else:
             try:
@@ -363,8 +380,14 @@ class Episode:
                 out = f"bad arguments for {name}: {e}"
             except Exception as e:  # a tool must never crash the episode
                 out = f"tool error: {type(e).__name__}: {e}"[:300]
+        return self._deliver(name, args, out)
+
+    def _deliver(self, name: str, args: dict, out) -> str:
         out = _cap(str(out), LIMITS["max_output_chars"])
-        cost = self.count_tokens(out) + LIMITS["model_tokens_per_turn"]
+        allowance = (
+            0 if getattr(self, "_sees_model_text", False) else LIMITS["model_tokens_per_turn"]
+        )
+        cost = self.count_tokens(out) + allowance
         if not self.done and (
             self.tokens_used + cost + LIMITS["reserve_tokens"] > LIMITS["context_tokens"]
         ):
@@ -372,7 +395,13 @@ class Episode:
             self._end("context_exhausted")
             return "context budget exhausted; the episode is over."
         self.tokens_used += cost
-        self._log("tool", name=name, args=args, output=out, tokens=cost)
+        self._log(
+            "tool" if name != "__nudge__" else "nudge",
+            name=name,
+            args=args,
+            output=out,
+            tokens=cost,
+        )
         if not self.done and self.turns >= self.turn_limit:
             self._end("turn_limit")
             out += "\n[turn limit reached; the episode is over]"

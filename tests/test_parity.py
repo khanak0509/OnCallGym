@@ -9,38 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "environments" / "oncallgym_env" / "src"))
 
-from oncallgym.episode import TOOL_NAMES, Tools, tool_schemas  # noqa: E402
+from oncallgym.episode import tool_schemas  # noqa: E402
 from oncallgym.prompt import system_prompt, task_prompt  # noqa: E402
-from training.trl_env import OnCallEnv  # noqa: E402
-
-
-def test_trl_methods_match_core_tools():
-    public = sorted(
-        n
-        for n, _ in inspect.getmembers(OnCallEnv, inspect.isfunction)
-        if not n.startswith("_") and n not in ("reset", "get_reward")
-    )
-    assert public == sorted(TOOL_NAMES)
-    for n in TOOL_NAMES:
-        assert inspect.signature(getattr(OnCallEnv, n)) == inspect.signature(getattr(Tools, n))
-        assert getattr(OnCallEnv, n).__doc__ == getattr(Tools, n).__doc__
-
-
-def test_trl_delegate_forwards_args():
-    calls = []
-
-    class FakeEpisode:
-        done = False
-
-        def call_tool(self, name, args):
-            calls.append((name, args))
-            return "ok"
-
-    env = OnCallEnv()
-    env.episode = FakeEpisode()
-    assert env.logs(service="orders", grep="error") == "ok"
-    assert env.logs(nonsense=1) == "ok"
-    assert calls == [("logs", {"service": "orders", "grep": "error"}), ("logs", {"nonsense": 1})]
 
 
 def test_verifiers_toolset_serves_core_schemas():
@@ -80,19 +50,24 @@ def test_trl_dataset_prompt_is_core_prompt():
         assert r["prompt"][1]["content"] == task_prompt(f.alert(), f.turn_limit)
 
 
-def test_trl_rendered_schemas_match_core():
-    """TRL renders tool schemas with transformers' parser; they must equal ours."""
-    import pytest
+def test_training_and_eval_share_the_runner():
+    """Training (TRL rollout_func) and eval drive episodes through the same function, which
+    uses the same loop (nudge, parsing) and renderer (template, schemas, no thinking)."""
 
-    tu = pytest.importorskip("transformers.utils")
-    for s in tool_schemas():
-        name = s["function"]["name"]
-        trl = tu.get_json_schema(getattr(OnCallEnv, name))
-        assert trl["function"]["name"] == name
-        assert (
-            trl["function"]["parameters"].get("required", [])
-            == (s["function"]["parameters"]["required"])
-        )
-        assert set(trl["function"]["parameters"]["properties"]) == set(
-            s["function"]["parameters"]["properties"]
-        )
+    import oncallgym.evaluate as ev
+    import training.rollout as ro
+    from oncallgym import runner
+
+    assert ro.run_episodes is runner.run_episodes
+    assert ev.run_episodes is runner.run_episodes
+    src = inspect.getsource(runner)
+    assert "AgentLoop" in src and "TokenRenderer" in src
+    assert runner.TEMPLATE_KWARGS == {"enable_thinking": False}
+
+
+def test_sft_data_uses_the_runner_renderer():
+    import training.sft_data as sd
+    from oncallgym import runner
+
+    assert sd.TokenRenderer is runner.TokenRenderer
+    assert sd.AgentLoop.__module__ == "oncallgym.loop"

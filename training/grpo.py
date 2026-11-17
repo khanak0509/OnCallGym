@@ -1,5 +1,6 @@
 """GRPO (TRL) with LoRA on OnCallGym train families. Rollouts are real episodes through
-training/trl_env.OnCallEnv (the same Episode, tools and verifier as eval).
+training/rollout.py (TRL rollout_func) and the shared runner/loop in oncallgym (the same code
+eval uses: Episode, tools, nudge on text-only replies, verifier).
 
     trl vllm-serve --model Qwen/Qwen3-1.7B ... (GPU 1)
     python training/grpo.py --out runs/grpo --adapter runs/sft/adapter --steps 60
@@ -32,7 +33,6 @@ def main():
     ap.add_argument("--grad-accum", type=int, default=8)
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--max-len", type=int, default=8192)
-    ap.add_argument("--max-turns", type=int, default=16)
     ap.add_argument("--variants", type=int, default=8)
     ap.add_argument("--tiers", default="easy,medium,hard")
     ap.add_argument("--vllm-port", type=int, default=8000)
@@ -45,12 +45,11 @@ def main():
     from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
     from trl import GRPOConfig, GRPOTrainer
 
-    import training.trl_env as trl_env
     from training.dataset import build_rows, to_hf_dataset
+    from training.rollout import drain_episode_log, make_rollout_func, oncall_reward
 
     os.makedirs(a.out, exist_ok=True)
     tok = AutoTokenizer.from_pretrained(a.model)
-    trl_env.TOKENIZER = tok
     tiers = set(a.tiers.split(","))
     rows = [r for r in build_rows("train", variants=range(a.variants)) if r["tier"] in tiers]
     ds = to_hf_dataset(rows).shuffle(seed=0)
@@ -73,7 +72,7 @@ def main():
                 "peak_reserved_gb": round(torch.cuda.max_memory_reserved() / 2**30, 2),
                 "grad_scaler_scale": scaler.get_scale() if scaler is not None else None,
                 "forward_input_lengths": list(forward_lengths),
-                "episodes": trl_env.drain_episode_log(),
+                "episodes": drain_episode_log(),
                 **{k: v for k, v in (logs or {}).items()},
             }
             nonfinite = [k for k, v in rec.items() if isinstance(v, float) and not math.isfinite(v)]
@@ -103,8 +102,7 @@ def main():
         per_device_train_batch_size=1,
         gradient_accumulation_steps=a.grad_accum,
         num_generations=a.generations,
-        max_completion_length=a.max_len - 1200,  # our Episode ends earlier (context_exhausted)
-        max_tool_calling_iterations=a.max_turns,
+        max_completion_length=a.max_len - 600,  # the runner ends episodes before the context cap
         learning_rate=a.lr,
         fp16=True,
         bf16=False,
@@ -122,11 +120,12 @@ def main():
         model=model,
         args=cfg,
         train_dataset=ds,
-        environment_factory=trl_env.OnCallEnv,
+        processing_class=tok,
+        reward_funcs=[oncall_reward],
+        rollout_func=make_rollout_func(rows, os.path.join(a.out, "rollouts")),
         peft_config=peft_config,
         callbacks=[Logger()],
     )
-
     # record the real input length of every policy forward pass (owner requirement)
     orig = trainer._get_per_token_logps_and_entropies
 
