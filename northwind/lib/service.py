@@ -247,6 +247,11 @@ class Service:
                         self.stopping.set()
 
             threading.Thread(target=orphan_watch, daemon=True).start()
+        noise_s = float(self.config.get("log", {}).get("noise_interval_s", 8))
+        if noise_s > 0 and self.name not in ("telemetry", "trafficgen", "provider"):
+            from .noise import emitter
+
+            self.every(noise_s, emitter(self), "log_noise")
         for fn, args in self.background:
             threading.Thread(target=fn, args=args, daemon=True).start()
         serve_in_thread(srv)
