@@ -18,7 +18,7 @@ def test_trl_methods_match_core_tools():
     public = sorted(
         n
         for n, _ in inspect.getmembers(OnCallEnv, inspect.isfunction)
-        if not n.startswith("_") and n not in ("reset", "get_reward", "close")
+        if not n.startswith("_") and n not in ("reset", "get_reward")
     )
     assert public == sorted(TOOL_NAMES)
     for n in TOOL_NAMES:

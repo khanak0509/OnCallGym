@@ -35,7 +35,7 @@ class OnCallEnv:
         self.breakdown = None
 
     def reset(self, **row) -> str | None:
-        self.close()
+        self._close()
         self.breakdown = None
         self._start_error = None
         self.episode = Episode(row["family"], int(row["variant"]), int(row["seed"]))
@@ -92,10 +92,10 @@ class OnCallEnv:
             self._verify.start()
         self._verify.join()
         reward = self.breakdown.reward
-        self.close()
+        self._close()
         return reward
 
-    def close(self):
+    def _close(self):
         if self._ready is not None:
             self._ready.join()
             self._ready = None
