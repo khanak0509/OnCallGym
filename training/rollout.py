@@ -25,7 +25,9 @@ def drain_episode_log() -> list[dict]:
     return out
 
 
-def make_rollout_func(rows, rollouts_dir=None, max_turn_tokens=768, max_model_len=8192):
+def make_rollout_func(
+    rows, rollouts_dir=None, max_turn_tokens=768, max_model_len=8192, run=run_episodes
+):
     by_prompt: dict[str, list[dict]] = {}
     for r in rows:
         by_prompt.setdefault(json.dumps(r["prompt"], sort_keys=True), []).append(r)
@@ -33,13 +35,16 @@ def make_rollout_func(rows, rollouts_dir=None, max_turn_tokens=768, max_model_le
     counter = [0]
 
     def rollout_func(prompts, trainer):
+        # TRL's RepeatSampler already repeats each prompt num_generations times in a row, so
+        # one episode per received prompt; a group must all play the same task.
         n = trainer.num_generations
         vg = trainer.vllm_generation
         tok = trainer.processing_class
         specs = []
-        for p in prompts:
-            row = rng.choice(by_prompt[json.dumps(p, sort_keys=True)])
-            specs += [{"family": row["family"], "variant": row["variant"], "seed": row["seed"]}] * n
+        for i, p in enumerate(prompts):
+            if i % n == 0:
+                row = rng.choice(by_prompt[json.dumps(p, sort_keys=True)])
+            specs.append({"family": row["family"], "variant": row["variant"], "seed": row["seed"]})
 
         def generate(batch, max_new):
             saved = vg.max_completion_length
@@ -50,7 +55,7 @@ def make_rollout_func(rows, rollouts_dir=None, max_turn_tokens=768, max_model_le
                 vg.max_completion_length = saved
             return [(i, [lp[0] for lp in lp_seq]) for i, lp_seq in zip(ids, lps, strict=True)]
 
-        results = run_episodes(
+        results = run(
             specs, generate, tok, max_turn_tokens=max_turn_tokens, max_model_len=max_model_len
         )
         for r in results:
