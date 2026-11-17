@@ -6,9 +6,11 @@ start; rotating keys means writing a new file, updating kid, and restarting auth
 
 import hashlib
 import hmac
+import secrets
 import time
 
 from northwind.lib import jwt
+from northwind.lib.http import UpstreamError
 from northwind.lib.service import Service, require
 
 
@@ -20,6 +22,7 @@ def main():
     svc = Service("auth")
     svc.use_flags()
     db = svc.database("users")
+    sessions = svc.upstream("cache")
     sk = svc.config["signing_key"]
     keys = jwt.load_keys([{"kid": sk["kid"], "file": svc.path(sk["file"])}])
     signing_key = keys.get(sk["kid"])
@@ -52,6 +55,19 @@ def main():
             return 401, {"error": "invalid credentials"}
         ttl = int(svc.flag("token_ttl_s", 900))
         now = int(time.time())
+        sid = secrets.token_hex(12)
+        try:
+            r = sessions.request(
+                "PUT", f"/kv/session:{sid}", body={"value": str(user["id"]), "ttl_s": ttl}
+            )
+            stored = r.ok
+            err = None if r.ok else r.json().get("error")
+        except UpstreamError as e:
+            stored, err = False, e.kind
+        if not stored:
+            svc.metrics.inc("auth_logins_total", outcome="session_store_error")
+            svc.log.error("login failed: cannot store session", req=req.request_id, error=err)
+            return 503, {"error": "session store unavailable"}
         token = jwt.sign(
             {
                 "sub": user["id"],

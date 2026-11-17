@@ -2,8 +2,14 @@
 
 from .faults import FAMILIES
 
-# held-out families: never trained on (more are added in Phase 4)
-TEST_FAMILIES = {"jwt_key_rotation_mismatch"}
+# held-out families: never trained on (rationale in the README / DECISIONS)
+TEST_FAMILIES = {
+    "jwt_key_rotation_mismatch",
+    "orders_config_drift",
+    "payments_breaker_stuck_open",
+    "cache_full_noeviction",
+    "poison_message",
+}
 
 
 def families(split: str = "all") -> list[str]:

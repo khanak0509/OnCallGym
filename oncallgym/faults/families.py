@@ -1347,9 +1347,287 @@ class MissingMigration(Fault):
         assert st == 200, body
 
 
+def _env_path(stack, service):
+    return os.path.join(stack.home, "etc", "env", f"{service}.env")
+
+
+class FulfillmentEnvTypo(Fault):
+    """Spec 5. A typo in fulfillment's env file (warehouse id variable misspelled) makes it
+    fall back to its unsafe default, dry-run mode: order.paid events are acknowledged but
+    nothing ships. After fixing the variable, the orders acknowledged in dry-run mode must
+    be re-driven."""
+
+    family = "fulfillment_env_typo"
+    spec_number = 5
+    category = "config"
+    tier = "medium"
+    settle_s = 6.0
+
+    def choose_params(self, rng):
+        return {
+            "typo": rng.choice(
+                ["FULFILMENT_WAREHOUSE_ID", "FULFILLMENT_WAREHOUSE", "FULFILLMENT_WAREHOUSEID"]
+            )
+        }
+
+    @property
+    def component(self):
+        return "fulfillment"
+
+    def describe(self):
+        return (
+            f"etc/env/fulfillment.env sets {self.params['typo']} instead of "
+            "FULFILLMENT_WAREHOUSE_ID; fulfillment runs in dry-run mode"
+        )
+
+    def alert(self):
+        return "Orders are paid but none have shipped for several minutes."
+
+    def configure(self, stack):
+        path = _env_path(stack, "fulfillment")
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(text.replace("FULFILLMENT_WAREHOUSE_ID=", self.params["typo"] + "="))
+
+    def root_cause_fixed(self, stack):
+        from northwind.supervisor import read_env_file
+
+        wh = read_env_file(_env_path(stack, "fulfillment")).get("FULFILLMENT_WAREHOUSE_ID")
+        return bool(wh) and wh != "DRYRUN"
+
+    def solution_steps(self, stack):
+        f = stack.ports["fulfillment"]
+        typo = self.params["typo"]
+        return [
+            (
+                "logs",
+                {"service": "fulfillment", "tail": 5, "grep": "dry"},
+                "Nothing ships. Check fulfillment.",
+            ),
+            (
+                "exec",
+                {"command": "cat etc/env/fulfillment.env"},
+                "It runs in dry-run mode because the warehouse id is not set. Check its env.",
+            ),
+            (
+                "exec",
+                {
+                    "command": f"sed -i 's/^{typo}=/FULFILLMENT_WAREHOUSE_ID=/' "
+                    "etc/env/fulfillment.env && cat etc/env/fulfillment.env"
+                },
+                f"The variable is misspelled as {typo}. Fix it.",
+            ),
+            ("restart", {"service": "fulfillment"}, "Restart fulfillment to read its env."),
+            (
+                "exec",
+                {"command": f"curl -s -X POST http://127.0.0.1:{f}/admin/redrive"},
+                "Orders acknowledged in dry-run mode were never shipped. Re-drive them.",
+            ),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "config",
+                    "component": "fulfillment",
+                    "summary": "typo in fulfillment env var left it in dry-run "
+                    "mode; fixed the name and re-drove paid orders.",
+                },
+                "Orders ship. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        path = _env_path(stack, "fulfillment")
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(text.replace(self.params["typo"] + "=", "FULFILLMENT_WAREHOUSE_ID="))
+        restart_and_wait(stack, "fulfillment")
+        st, body = http_json(stack.ports["fulfillment"], "POST", "/admin/redrive")
+        assert st == 200, body
+
+
+class OrdersConfigDrift(Fault):
+    """Spec 6. orders is running last release's config: its env file still points
+    NW_CONFIG_FILE at the archived config, which calls the decommissioned payments-v1
+    endpoint. Checkout fails; etc/orders.yaml itself looks correct."""
+
+    family = "orders_config_drift"
+    spec_number = 6
+    category = "config"
+    tier = "hard"
+
+    def choose_params(self, rng):
+        return {}
+
+    @property
+    def component(self):
+        return "orders"
+
+    def describe(self):
+        return (
+            "etc/env/orders.env NW_CONFIG_FILE=etc/archive/orders-2026-09.yaml (old payments "
+            "endpoint)"
+        )
+
+    def alert(self):
+        return "Every checkout fails with 502 since this morning's deploy."
+
+    def configure(self, stack):
+        with open(_env_path(stack, "orders"), "a") as f:
+            f.write("NW_CONFIG_FILE=etc/archive/orders-2026-09.yaml\n")
+
+    def root_cause_fixed(self, stack):
+        from northwind.supervisor import read_env_file
+
+        cf = read_env_file(_env_path(stack, "orders")).get("NW_CONFIG_FILE", "etc/orders.yaml")
+        return os.path.normpath(cf) == "etc/orders.yaml"
+
+    def solution_steps(self, stack):
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "checkout failed"},
+                "Checkouts fail with 502. See why.",
+            ),
+            (
+                "logs",
+                {"service": "orders", "tail": 2, "grep": "service started"},
+                "orders cannot reach payments. Which config did it start with?",
+            ),
+            (
+                "exec",
+                {
+                    "command": "cat etc/env/orders.env; grep -n -A2 '^  payments:' "
+                    "etc/orders.yaml etc/archive/orders-2026-09.yaml"
+                },
+                "It loaded an archived config with the old payments endpoint.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i '/^NW_CONFIG_FILE=/d' etc/env/orders.env && "
+                    "cat etc/env/orders.env"
+                },
+                "Remove the override so orders uses etc/orders.yaml.",
+            ),
+            ("restart", {"service": "orders"}, "Restart orders."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "config",
+                    "component": "orders",
+                    "summary": "orders ran the archived 2026-09 config via "
+                    "NW_CONFIG_FILE (old payments endpoint); removed it.",
+                },
+                "Checkouts work. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        path = _env_path(stack, "orders")
+        with open(path) as f:
+            lines = [ln for ln in f if not ln.startswith("NW_CONFIG_FILE=")]
+        with open(path, "w") as f:
+            f.writelines(lines)
+        restart_and_wait(stack, "orders")
+
+
+class CacheFullNoEviction(Fault):
+    """Spec 13. The cache was given a small memory limit and the noeviction policy. It fills
+    up with catalog entries within seconds; afterwards every write is refused, and auth,
+    which stores login sessions there, rejects every login."""
+
+    family = "cache_full_noeviction"
+    spec_number = 13
+    category = "resource_exhaustion"
+    tier = "medium"
+    settle_s = 12.0
+
+    def choose_params(self, rng):
+        return {"max_bytes": rng.choice([8_000, 12_000, 16_000])}
+
+    @property
+    def component(self):
+        return "cache"
+
+    def describe(self):
+        return (
+            f"etc/cache.yaml max_memory_bytes={self.params['max_bytes']} with "
+            "eviction_policy noeviction: cache full, session writes refused"
+        )
+
+    def alert(self):
+        return "Customers cannot log in (503); browsing works."
+
+    def configure(self, stack):
+        edit_service_config(
+            stack,
+            "cache",
+            lambda d: d.update(
+                max_memory_bytes=self.params["max_bytes"], eviction_policy="noeviction"
+            ),
+        )
+
+    def root_cause_fixed(self, stack):
+        c = read_yaml(config_path(stack, "cache"))
+        return (
+            c.get("eviction_policy") != "noeviction"
+            or int(c.get("max_memory_bytes", 0)) >= 1_000_000
+        )
+
+    def solution_steps(self, stack):
+        return [
+            (
+                "logs",
+                {"service": "auth", "tail": 5, "grep": "session"},
+                "Logins fail. See why auth rejects them.",
+            ),
+            ("metrics", {"service": "cache"}, "auth cannot store sessions. Check the cache."),
+            (
+                "exec",
+                {"command": "cat etc/cache.yaml"},
+                "The cache is full and refuses writes. Check its limits and policy.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/eviction_policy: noeviction/eviction_policy: "
+                    "allkeys-lru/; s/max_memory_bytes: .*/max_memory_bytes: "
+                    "4000000/' etc/cache.yaml && cat etc/cache.yaml"
+                },
+                "Tiny limit with noeviction: once full nothing can be written. Evict LRU and "
+                "restore the limit.",
+            ),
+            ("restart", {"service": "cache"}, "Restart the cache."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "resource_exhaustion",
+                    "component": "cache",
+                    "summary": "cache had a tiny memory limit and noeviction, so "
+                    "it filled and refused session writes; set "
+                    "allkeys-lru and 4 MB.",
+                },
+                "Logins work. Submit.",
+            ),
+        ]
+
+    def oracle(self, stack):
+        edit_service_config(
+            stack,
+            "cache",
+            lambda d: d.update(max_memory_bytes=4_000_000, eviction_policy="allkeys-lru"),
+        )
+        restart_and_wait(stack, "cache")
+
+
 FAMILIES = {
     cls.family: cls
     for cls in (
+        FulfillmentEnvTypo,
+        OrdersConfigDrift,
+        CacheFullNoEviction,
         SchedulerLockHold,
         CatalogBadBuildFlag,
         FlagsServiceDown,

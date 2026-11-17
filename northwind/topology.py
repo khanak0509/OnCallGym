@@ -16,7 +16,12 @@ SERVICES = {
     "cache": (11, 0, [], "key-value cache with memory budget and eviction policy"),
     "flags": (12, 0, [], "central config and feature flags; services poll it"),
     "provider": (7, 0, [], "external payment provider (third party, not ours to change)"),
-    "auth": (2, 1, ["flags"], "users, login, JWT issue and verify (HTTPS)"),
+    "auth": (
+        2,
+        1,
+        ["cache", "flags"],
+        "users, login (sessions kept in cache), JWT issue and verify (HTTPS)",
+    ),
     "catalog": (3, 1, ["cache", "flags"], "products, search, pricing; read-through cache"),
     "inventory": (4, 1, ["broker", "flags"], "stock levels and reservations with expiry"),
     "payments": (

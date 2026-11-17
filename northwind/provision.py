@@ -263,7 +263,14 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
         "provider": base(
             "provider", db=db("provider"), latency_ms={"base": 40, "jitter": 40}, error_rate=0.01
         ),
-        "auth": base("auth", {"token_ttl_s": 900}, db=db("users"), signing_key=key, verify_keys=[]),
+        "auth": base(
+            "auth",
+            {"token_ttl_s": 900},
+            db=db("users"),
+            signing_key=key,
+            verify_keys=[],
+            upstreams={"cache": {"url": url("cache"), "timeout_ms": 300, "pool_size": 8}},
+        ),
         "catalog": base(
             "catalog",
             {"promo_discount_pct": 0, "promo_categories": []},
@@ -400,6 +407,8 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
     return cfgs
 
 
+SERVICE_ENV = {"fulfillment": {"FULFILLMENT_WAREHOUSE_ID": "WH-EAST-1"}}
+
 FLAGS = {
     "global": {"maintenance_mode": False},
     "services": {
@@ -454,6 +463,7 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
             yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=False)
         with open(os.path.join(home, f"etc/env/{name}.env"), "w") as f:
             f.write(f"NW_ENV=production\nNW_SERVICE={name}\nMALLOC_ARENA_MAX=2\n")
+            f.write("".join(f"{k}={v}\n" for k, v in SERVICE_ENV.get(name, {}).items()))
     # behaviour of third-party systems (not ours to change; hash-protected by the verifier)
     os.makedirs(os.path.join(home, "etc/external"), exist_ok=True)
     with open(os.path.join(home, "etc/external/smtp.yaml"), "w") as f:
@@ -461,6 +471,15 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
         yaml.safe_dump({"relay": "smtp.mailrelay.example:587", "error_rate": 0.2}, f)
     with open(os.path.join(home, "etc/feature-flags.yaml"), "w") as f:
         yaml.safe_dump(FLAGS, f, sort_keys=False)
+    # deploy tooling keeps the previous release's config for rollbacks
+    os.makedirs(os.path.join(home, "etc/archive"), exist_ok=True)
+    old_orders = service_configs(p, seed)["orders"]
+    old_orders["build"]["version"] = "3.9.2"
+    old_orders["upstreams"]["payments"]["url"] = f"http://127.0.0.1:{base_port + 16}"
+    old_orders["upstreams"]["payments"]["timeout_ms"] = 3000
+    with open(os.path.join(home, "etc/archive/orders-2026-09.yaml"), "w") as f:
+        f.write("# orders 3.9.2 - archived by deploy tooling (payments-v1 endpoint)\n")
+        yaml.safe_dump(old_orders, f, sort_keys=False, default_flow_style=False)
     with open(os.path.join(home, "etc/supervisor.yaml"), "w") as f:
         yaml.safe_dump(supervisor_config(p), f, sort_keys=False)
     with open(os.path.join(home, "etc/topology.json"), "w") as f:

@@ -125,7 +125,14 @@ class Service:
         return rel if os.path.isabs(rel) else os.path.join(self.home, rel)
 
     def load_config(self) -> dict:
-        with open(self.path(f"etc/{self.name}.yaml")) as f:
+        """etc/<name>.yaml, unless NW_CONFIG_FILE names another file under etc/ (used by the
+        deploy tooling for canaries and rollbacks)."""
+        rel = os.environ.get("NW_CONFIG_FILE") or f"etc/{self.name}.yaml"
+        path = os.path.realpath(self.path(rel))
+        if not path.startswith(os.path.realpath(self.path("etc")) + os.sep):
+            raise SystemExit(f"NW_CONFIG_FILE must be under etc/: {rel}")
+        self.config_file = os.path.relpath(path, self.home)
+        with open(path) as f:
             return yaml.safe_load(f) or {}
 
     def upstream(self, name: str, internal: bool = True) -> Upstream:
@@ -245,6 +252,7 @@ class Service:
         serve_in_thread(srv)
         self.log.info(
             "service started",
+            config=self.config_file,
             version=self.version,
             port=port,
             build=json.dumps(self.build_flags, separators=(",", ":")),
