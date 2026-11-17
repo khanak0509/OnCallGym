@@ -1,0 +1,395 @@
+{
+ "run": "smoke_qwen3-1.7b_20261117",
+ "model": "Qwen/Qwen3-1.7B",
+ "commit": "a9f0f1d",
+ "date": "2026-11-17",
+ "fingerprints": [
+  "3b3ea36acf0dda15"
+ ],
+ "notes": "Phase 3 smoke via vf-run on Kaggle T4 (vLLM 0.33.0 fp16, hermes tool parser, enable_thinking=false via server default chat template kwargs), 10 families x variant 0 x 1 rollout, temperature = vf-run default. Pre-release prompt; not a baseline.",
+ "aggregate": {
+  "episodes": 10,
+  "mean_reward": 0.0,
+  "solved_rate": 0.0,
+  "R_rate": 0.0,
+  "P_rate": 0.0,
+  "C_rate": 0.0,
+  "G_rate": 1.0,
+  "mean_tool_calls": 9.1,
+  "terminations": {
+   "error": 5,
+   "turn_limit": 5
+  },
+  "by_family": {
+   "catalog_leak_flag": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "edge_rate_limit_too_low": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "edge_wrong_upstream_port": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "fulfillment_wrong_topic": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "jwt_key_rotation_mismatch": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "notify_dead_letters": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "orders_payments_timeout_inversion": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "payments_breaker_stuck_open": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "poison_message": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   },
+   "wrong_database_path": {
+    "n": 1,
+    "mean_reward": 0.0,
+    "solved_rate": 0.0
+   }
+  }
+ },
+ "episodes": [
+  {
+   "file": "catalog_leak_flag_0-9960af0d.json",
+   "variant": "catalog_leak_flag/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "metrics",
+    "metrics",
+    "metrics",
+    "metrics"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "error",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "resource_exhaustion",
+    "component": "catalog",
+    "description": "feature flag recommendations_v2 enables catalog code that leaks memory per request; catalog is OOM-killed and restarted repeatedly",
+    "also_accepted": [
+     "flags"
+    ]
+   }
+  },
+  {
+   "file": "edge_rate_limit_too_low_0-2e78374d.json",
+   "variant": "edge_rate_limit_too_low/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "list_services",
+    "list_services",
+    "list_services",
+    "list_services",
+    "logs",
+    "metrics",
+    "list_services"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "turn_limit",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "config",
+    "component": "edge",
+    "description": "etc/edge.yaml rate_limit.rps=0.05 burst=1 (normally 20/40)",
+    "also_accepted": []
+   }
+  },
+  {
+   "file": "edge_wrong_upstream_port_0-1f3ee06e.json",
+   "variant": "edge_wrong_upstream_port/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "logs",
+    "metrics",
+    "logs",
+    "logs",
+    "metrics",
+    "logs"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "turn_limit",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "config",
+    "component": "edge",
+    "description": "etc/edge.yaml upstreams.auth.url points at the wrong port, so every auth route through the edge fails",
+    "also_accepted": []
+   }
+  },
+  {
+   "file": "fulfillment_wrong_topic_0-2e5c086c.json",
+   "variant": "fulfillment_wrong_topic/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "metrics",
+    "trace",
+    "list_services"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "error",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "config",
+    "component": "fulfillment",
+    "description": "etc/fulfillment.yaml consumer.topic is order_paid instead of order.paid; events published meanwhile are missing from the queue",
+    "also_accepted": []
+   }
+  },
+  {
+   "file": "jwt_key_rotation_mismatch_0-98d57f85.json",
+   "variant": "jwt_key_rotation_mismatch/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "exec",
+    "exec",
+    "logs"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "turn_limit",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "auth",
+    "component": "orders",
+    "description": "auth signs tokens with new key k-2026-11; orders auth.trusted_keys was not updated, so token verification fails at checkout",
+    "also_accepted": [
+     "auth"
+    ]
+   }
+  },
+  {
+   "file": "notify_dead_letters_0-6fcc5436.json",
+   "variant": "notify_dead_letters/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "error",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "data",
+    "component": "broker",
+    "description": "etc/broker.yaml queues.notify.events.max_redeliveries=0: transient relay errors dead-letter emails",
+    "also_accepted": []
+   }
+  },
+  {
+   "file": "orders_payments_timeout_inversion_0-19f90bd6.json",
+   "variant": "orders_payments_timeout_inversion/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "exec",
+    "list_services",
+    "exec",
+    "exec"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "error",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "resilience_config",
+    "component": "orders",
+    "description": "provider latency degraded to ~700ms; orders->payments timeout 300ms is below payments->provider timeout 2500ms, so checkouts time out in orders",
+    "also_accepted": []
+   }
+  },
+  {
+   "file": "payments_breaker_stuck_open_0-8e85c762.json",
+   "variant": "payments_breaker_stuck_open/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "list_services",
+    "list_services",
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "turn_limit",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "resilience_config",
+    "component": "payments",
+    "description": "etc/payments.yaml breaker failure_threshold=1, reset_timeout_s=900 with provider error rate 0.12: breaker stays open",
+    "also_accepted": []
+   }
+  },
+  {
+   "file": "poison_message_0-a96907eb.json",
+   "variant": "poison_message/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs",
+    "logs"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "error",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "data",
+    "component": "fulfillment",
+    "description": "malformed order.paid message at the head of the ordered queue fulfillment.order-paid fails on every delivery and blocks all shipments",
+    "also_accepted": [
+     "broker"
+    ]
+   }
+  },
+  {
+   "file": "wrong_database_path_0-9cf0fbfc.json",
+   "variant": "wrong_database_path/0",
+   "fingerprint": "3b3ea36acf0dda15",
+   "tool_calls": [
+    "list_services",
+    "logs",
+    "metrics",
+    "exec",
+    "exec",
+    "exec",
+    "exec",
+    "exec"
+   ],
+   "finished": true,
+   "R": 0.0,
+   "P": 0.0,
+   "C": 0.0,
+   "G": 1.0,
+   "reward": 0.0,
+   "solved": false,
+   "termination": "turn_limit",
+   "diagnosis": null,
+   "ground_truth": {
+    "category": "config",
+    "component": "catalog",
+    "description": "etc/catalog.yaml db.path is data/missing-volume/catalog.db instead of data/catalog.db",
+    "also_accepted": []
+   }
+  }
+ ]
+}

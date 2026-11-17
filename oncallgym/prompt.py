@@ -7,8 +7,10 @@ about fifteen microservices. An alert fired and customers are affected. Find the
 fix it so the system recovers and stays recovered after restarts, then submit your diagnosis.
 
 Rules:
-- Use the tools. Shell commands run in the deployment directory (configs in etc/, logs in \
-logs/, data in data/). You may edit config files; you may not change code, data, the external \
+- Use the tools. Shell commands run in the deployment directory: service configs are \
+etc/<service>.yaml, environment files etc/env/<service>.env, feature flags \
+etc/feature-flags.yaml, logs logs/<service>.log, data in data/. You may edit config \
+files; you may not change code, data, the external \
 payment provider, the traffic generator or telemetry.
 - Fix the cause, not the symptom. Restarting alone does not fix configuration or data problems.
 - Do not delete or rewrite business data, messages or logs.

@@ -343,6 +343,30 @@ class Probe:
                 not bad and not orphan,
                 (bad[:5] + [{"orphan_charge_for": o} for o in orphan[:5]]) or None,
             )
+            orphan_items = orders.execute(
+                "SELECT COUNT(*) FROM order_items i LEFT JOIN orders o ON o.id=i.order_id "
+                "WHERE o.id IS NULL"
+            ).fetchone()[0]
+            # reservations newer than the orders snapshot may belong to unseen orders
+            old_res = {
+                r[0]
+                for r in inv.execute(
+                    "SELECT DISTINCT order_id FROM reservations WHERE created_at < ?",
+                    (t_orders - 1.0,),
+                )
+            }
+            orphan_res = sorted(old_res - known)
+            res(
+                "order_records_intact",
+                not orphan_items and not orphan_res,
+                None
+                if not orphan_items and not orphan_res
+                else {
+                    "items_without_order": orphan_items,
+                    "reservations_without_order": orphan_res[:5],
+                    "count": len(orphan_res),
+                },
+            )
             res("charged_failed_orders_refunded", not unrefunded, unrefunded[:5] or None)
 
             stuck = orders.execute(

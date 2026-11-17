@@ -39,7 +39,8 @@ LIMITS = {
     "logs_max_tail": 50,
     "line_max_chars": 240,
 }
-TERMINATIONS = ("submitted", "turn_limit", "context_exhausted", "error")
+# no_submission: the agent stopped (text reply) before using all turns, without submitting
+TERMINATIONS = ("submitted", "turn_limit", "context_exhausted", "no_submission", "error")
 
 
 def approx_tokens(text: str) -> int:
@@ -375,7 +376,7 @@ class Episode:
         if self.breakdown is not None:
             return self.breakdown
         if self.termination is None:
-            self._end("turn_limit" if self.turns >= self.turn_limit else "error")
+            self._end("turn_limit" if self.turns >= self.turn_limit else "no_submission")
         try:
             b = verify(
                 self.stack,
