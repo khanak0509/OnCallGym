@@ -82,7 +82,7 @@ def main():
         seed=0,
         remove_unused_columns=False,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
+        warmup_steps=max(1, int(0.05 * len(ds) * a.epochs / a.grad_accum)),
     )
     t0 = time.time()
     trainer = Trainer(model=model, args=args, train_dataset=ds, data_collator=collate)
