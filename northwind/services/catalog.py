@@ -30,7 +30,7 @@ def main():
             "LIMIT 4",
             (category, sku),
         )
-        history.append((sku, bytearray(kb * 1024)))
+        history.append((sku, b"r" * (kb * 1024)))  # written, so it is resident
         return [r["sku"] for r in related]
 
     def price(p):

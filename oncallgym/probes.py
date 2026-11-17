@@ -444,6 +444,23 @@ class Probe:
                         except ValueError:
                             continue
                         emails.setdefault(e.get("order_id"), set()).add(e.get("template"))
+            # every event notify acknowledged must have produced its email (safety: catches
+            # a rewritten or truncated outbox regardless of timing)
+            acked_notify = set()
+            for r in broker.execute(
+                "SELECT m.payload, m.topic FROM entries e JOIN messages m ON m.id=e.msg_id "
+                "WHERE e.queue='notify.events' AND e.state='acked'"
+            ):
+                try:
+                    oid = json.loads(r[0]).get("order_id")
+                except (ValueError, AttributeError):
+                    oid = None
+                if oid in order_ids:
+                    acked_notify.add((oid, r[1]))
+            missing_emails = sorted(
+                f"{o}:{t}" for o, t in acked_notify if t not in emails.get(o, set())
+            )
+            res("acked_events_have_emails", not missing_emails, missing_emails[:5] or None)
             unnotified = [
                 r[0]
                 for r in orders.execute(
