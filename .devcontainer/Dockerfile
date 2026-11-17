@@ -15,5 +15,7 @@ RUN useradd -m dev && mkdir -p /opt/venv && chown dev /opt/venv \
        users="$users,agent$i"; done \
     && echo "dev ALL=(${users#,}) NOPASSWD: ALL" > /etc/sudoers.d/agent \
     && chmod 0440 /etc/sudoers.d/agent
+# the repo is mounted under dev's home, which agent users cannot enter
+RUN chmod 700 /home/dev
 USER dev
-WORKDIR /workspace
+WORKDIR /home/dev/OnCallGym

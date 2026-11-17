@@ -30,6 +30,22 @@ def rss_bytes() -> int:
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
+def resolve_config_file(home: str, name: str, override: str | None) -> str:
+    """The config file a service actually loads. Only etc/<name>.yaml or a file directly
+    in etc/archive/ is allowed; anything else stops the service (the verifier uses the same
+    function, so it always checks the config that is really in effect)."""
+    default = os.path.realpath(os.path.join(home, "etc", f"{name}.yaml"))
+    if not override:
+        return default
+    path = os.path.realpath(os.path.join(home, override))
+    archive = os.path.realpath(os.path.join(home, "etc", "archive"))
+    if path == default or os.path.dirname(path) == archive:
+        return path
+    raise SystemExit(
+        f"NW_CONFIG_FILE must be etc/{name}.yaml or a file in etc/archive/: {override}"
+    )
+
+
 def read_token(home: str) -> str | None:
     """Service-to-service token; the file is readable only by the stack owner."""
     try:
@@ -125,12 +141,9 @@ class Service:
         return rel if os.path.isabs(rel) else os.path.join(self.home, rel)
 
     def load_config(self) -> dict:
-        """etc/<name>.yaml, unless NW_CONFIG_FILE names another file under etc/ (used by the
-        deploy tooling for canaries and rollbacks)."""
-        rel = os.environ.get("NW_CONFIG_FILE") or f"etc/{self.name}.yaml"
-        path = os.path.realpath(self.path(rel))
-        if not path.startswith(os.path.realpath(self.path("etc")) + os.sep):
-            raise SystemExit(f"NW_CONFIG_FILE must be under etc/: {rel}")
+        """etc/<name>.yaml, unless NW_CONFIG_FILE names an archived release config in
+        etc/archive/ (deploy tooling uses it for rollbacks). See resolve_config_file."""
+        path = resolve_config_file(self.home, self.name, os.environ.get("NW_CONFIG_FILE"))
         self.config_file = os.path.relpath(path, self.home)
         with open(path) as f:
             return yaml.safe_load(f) or {}

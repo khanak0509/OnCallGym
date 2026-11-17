@@ -131,6 +131,26 @@ def config_path(stack, name: str) -> str:
     return os.path.join(stack.home, "etc", name if name.endswith(".yaml") else f"{name}.yaml")
 
 
+def effective_config_path(stack, service: str) -> str:
+    """The config file the service really loads (honours a valid NW_CONFIG_FILE in its env
+    file, exactly as the service does)."""
+    from northwind.lib.service import resolve_config_file
+    from northwind.supervisor import read_env_file, safe_env
+
+    env = safe_env(read_env_file(os.path.join(stack.home, "etc", "env", f"{service}.env")))
+    return resolve_config_file(stack.home, service, env.get("NW_CONFIG_FILE"))
+
+
+def effective_config(stack, service: str) -> dict:
+    return read_yaml(effective_config_path(stack, service))
+
+
+def effective_flags(stack) -> dict:
+    """The feature-flags document the flags service really serves."""
+    rel = effective_config(stack, "flags").get("flags_file", "etc/feature-flags.yaml")
+    return read_yaml(os.path.join(stack.home, rel))
+
+
 def read_yaml(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f) or {}
@@ -155,21 +175,33 @@ def edit_service_config(stack, service: str, fn):
 def configure_quietly(stack, fault):
     """Apply fault.configure() and restore every etc/ file's timestamps afterwards, so the
     injected change cannot be found by sorting files by modification time."""
-    etc = os.path.join(stack.home, "etc")
-    times = {}
-    for root, _dirs, files in os.walk(etc):
-        for f in files:
-            p = os.path.join(root, f)
-            st = os.stat(p)
-            times[p] = (st.st_atime, st.st_mtime)
-    ref = max((t for t in times.values()), key=lambda t: t[1], default=None)
+    times = _snapshot_times(stack.home)
+    ref = max(times.values(), key=lambda t: t[1], default=None)
     fault.configure(stack)
-    for root, _dirs, files in os.walk(etc):
-        for f in files:
-            p = os.path.join(root, f)
-            t = times.get(p, ref)  # new files get the provisioning time too
-            if t:
-                os.utime(p, t)
+    # files first, then directories deepest-first (restoring a file can touch nothing,
+    # but creating one changes its directory's mtime)
+    paths = list(_snapshot_times(stack.home))
+    for p in sorted(paths, key=lambda q: (os.path.isdir(q), -q.count(os.sep))):
+        t = times.get(p, ref)  # anything new gets the provisioning time too
+        if t:
+            os.utime(p, t)
+
+
+def _snapshot_times(home: str) -> dict:
+    """atime/mtime of every file and directory under etc/ and data/ (fault configuration
+    may touch either)."""
+    out = {}
+    for top in ("etc", "data"):
+        base = os.path.join(home, top)
+        for root, dirs, files in os.walk(base):
+            for name in [*files, *dirs, ""]:
+                p = os.path.join(root, name) if name else root
+                try:
+                    st = os.stat(p)
+                except FileNotFoundError:
+                    continue
+                out[p] = (st.st_atime, st.st_mtime)
+    return out
 
 
 def start_with_fault(stack, fault, settle: bool = True):

@@ -326,7 +326,7 @@ class Episode:
         self.stack.start(timeout_s=45, require_ready=False)
         time.sleep(2)
         self.fault.inject(self.stack)
-        sandbox.lock_down(self.stack.home)
+        sandbox.lock_down(self.stack.home, self.agent_user)
         self.baseline = Baseline.capture(self.stack)
         time.sleep(self.fault.settle_s)
         msgs = [

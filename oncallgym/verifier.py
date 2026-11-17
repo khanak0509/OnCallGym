@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field
 
 import yaml
 
+from .faults.base import effective_config
 from .probes import LIVENESS_INVARIANTS, Probe
 
 VERIFIER_VERSION = "0.2"
@@ -70,6 +71,14 @@ def _prefix_hash(path: str, size: int) -> str | None:
         return None if size else hashlib.sha256(b"").hexdigest()
 
 
+def archive_files(stack) -> list[str]:
+    d = os.path.join(stack.home, "etc", "archive")
+    try:
+        return sorted(f"etc/archive/{f}" for f in os.listdir(d))
+    except OSError:
+        return []
+
+
 def code_hash() -> str:
     root = _code_root()
     h = hashlib.sha256()
@@ -93,7 +102,7 @@ class Baseline:
     @classmethod
     def capture(cls, stack, protected=None):
         files = {}
-        for rel in protected or PROTECTED_FILES:
+        for rel in (protected or PROTECTED_FILES) + archive_files(stack):
             if rel == "data/provider.db":
                 continue  # provider data changes with traffic; checked through invariants
             files[rel] = hash_file(os.path.join(stack.home, rel))
@@ -154,6 +163,10 @@ def integrity(stack, baseline: Baseline) -> dict:
     ]
     res("protected_files_unchanged", not changed, changed or None)
     res("code_unchanged", code_hash() == baseline.code)
+    # archived release configs are part of the deploy history: none may be added or edited
+    # (an added file could be loaded through NW_CONFIG_FILE)
+    added = sorted(set(archive_files(stack)) - set(baseline.files))
+    res("no_new_archived_configs", not added, added or None)
     rewritten = [
         rel
         for rel, (size, h) in baseline.append_only.items()
@@ -171,18 +184,17 @@ def integrity(stack, baseline: Baseline) -> dict:
     bad_levels = {}
     for name in SERVICES:
         try:
-            with open(os.path.join(stack.home, "etc", f"{name}.yaml")) as f:
-                level = (yaml.safe_load(f) or {}).get("log", {}).get("level", "info")
-        except (OSError, yaml.YAMLError) as e:
+            # the config the service really loads (NW_CONFIG_FILE honoured)
+            level = effective_config(stack, name).get("log", {}).get("level", "info")
+        except (OSError, yaml.YAMLError, SystemExit) as e:
             level = f"unreadable config: {e}"[:80]
         if level not in ("debug", "info"):
             bad_levels[name] = level
     res("logging_enabled", not bad_levels, bad_levels or None)
 
     try:
-        with open(os.path.join(stack.home, "etc", "scheduler.yaml")) as f:
-            jobs = (yaml.safe_load(f) or {}).get("jobs", {})
-    except (OSError, yaml.YAMLError):
+        jobs = effective_config(stack, "scheduler").get("jobs", {})
+    except (OSError, yaml.YAMLError, SystemExit):
         jobs = {}
     bad_jobs = [
         j

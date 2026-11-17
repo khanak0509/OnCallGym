@@ -10,7 +10,8 @@ from .base import (
     config_path,
     edit_service_config,
     edit_yaml,
-    read_yaml,
+    effective_config,
+    effective_flags,
     restart_and_wait,
 )
 
@@ -75,7 +76,7 @@ class EdgeWrongUpstreamPort(Fault):
 
     def root_cause_fixed(self, stack):
         up = self.params["upstream"]
-        url = read_yaml(config_path(stack, "edge"))["upstreams"][up]["url"]
+        url = effective_config(stack, "edge")["upstreams"][up]["url"]
         return _port_of(url) == stack.ports[up]
 
     def solution_steps(self, stack):
@@ -186,8 +187,8 @@ class OrdersPaymentsTimeoutInversion(Fault):
         edit_service_config(stack, "orders", orders)
 
     def root_cause_fixed(self, stack):
-        orders = read_yaml(config_path(stack, "orders"))["upstreams"]["payments"]
-        pay = read_yaml(config_path(stack, "payments"))["upstreams"]["provider"]
+        orders = effective_config(stack, "orders")["upstreams"]["payments"]
+        pay = effective_config(stack, "payments")["upstreams"]["provider"]
         # the outer call must wait longer than one inner attempt
         return int(orders["timeout_ms"]) > int(pay["timeout_ms"])
 
@@ -237,7 +238,7 @@ class OrdersPaymentsTimeoutInversion(Fault):
         ]
 
     def oracle(self, stack):
-        pay = read_yaml(config_path(stack, "payments"))["upstreams"]["provider"]
+        pay = effective_config(stack, "payments")["upstreams"]["provider"]
         budget = (int(pay.get("retries", 0)) + 1) * int(pay["timeout_ms"]) + 1000
 
         def fix(doc):
@@ -289,7 +290,7 @@ class CatalogLeakFlag(Fault):
         edit_yaml(config_path(stack, "feature-flags"), flags)
 
     def root_cause_fixed(self, stack):
-        flags = read_yaml(config_path(stack, "feature-flags"))
+        flags = effective_flags(stack)
         merged = {
             **(flags.get("global") or {}),
             **((flags.get("services") or {}).get("catalog") or {}),
@@ -385,8 +386,8 @@ class JwtKeyRotationMismatch(Fault):
         edit_service_config(stack, "auth", auth)
 
     def root_cause_fixed(self, stack):
-        auth_kid = read_yaml(config_path(stack, "auth"))["signing_key"]["kid"]
-        trusted = read_yaml(config_path(stack, "orders"))["auth"]["trusted_keys"]
+        auth_kid = effective_config(stack, "auth")["signing_key"]["kid"]
+        trusted = effective_config(stack, "orders")["auth"]["trusted_keys"]
         return any(k.get("kid") == auth_kid for k in trusted)
 
     def solution_steps(self, stack):
@@ -590,7 +591,7 @@ class WrongDatabasePath(Fault):
         edit_service_config(stack, self.params["service"], lambda d: d["db"].update(path=wrong))
 
     def root_cause_fixed(self, stack):
-        path = read_yaml(config_path(stack, self.params["service"]))["db"]["path"]
+        path = effective_config(stack, self.params["service"])["db"]["path"]
         full = path if os.path.isabs(path) else os.path.join(stack.home, path)
         return os.path.realpath(full) == os.path.realpath(
             os.path.join(stack.home, f"data/{self.params['db']}.db")
@@ -672,7 +673,7 @@ class EdgeRateLimitTooLow(Fault):
         )
 
     def root_cause_fixed(self, stack):
-        rl = read_yaml(config_path(stack, "edge")).get("rate_limit") or {}
+        rl = effective_config(stack, "edge").get("rate_limit") or {}
         return float(rl.get("rps", 40)) >= 5 and float(rl.get("burst", 80)) >= 5
 
     def solution_steps(self, stack):
@@ -745,7 +746,7 @@ class FulfillmentWrongTopic(Fault):
         )
 
     def root_cause_fixed(self, stack):
-        consumer = read_yaml(config_path(stack, "fulfillment"))["consumer"]
+        consumer = effective_config(stack, "fulfillment")["consumer"]
         return consumer.get("topic") == "order.paid"
 
     def solution_steps(self, stack):
@@ -853,7 +854,7 @@ class PaymentsBreakerStuckOpen(Fault):
         edit_service_config(stack, "payments", payments)
 
     def root_cause_fixed(self, stack):
-        b = read_yaml(config_path(stack, "payments"))["upstreams"]["provider"].get("breaker")
+        b = effective_config(stack, "payments")["upstreams"]["provider"].get("breaker")
         if not b:
             return True  # no breaker at all is a (blunt) valid choice
         return int(b.get("failure_threshold", 5)) >= 3 and float(b.get("reset_timeout_s", 5)) <= 60
@@ -949,7 +950,7 @@ class NotifyDeadLetters(Fault):
         edit_service_config(stack, "broker", broker)
 
     def root_cause_fixed(self, stack):
-        q = (read_yaml(config_path(stack, "broker")).get("queues") or {}).get("notify.events")
+        q = (effective_config(stack, "broker").get("queues") or {}).get("notify.events")
         return int((q or {}).get("max_redeliveries", 5)) != 0
 
     def solution_steps(self, stack):
@@ -1047,7 +1048,7 @@ class SchedulerLockHold(Fault):
         edit_service_config(stack, "scheduler", fn)
 
     def root_cause_fixed(self, stack):
-        job = read_yaml(config_path(stack, "scheduler"))["jobs"]["expire_reservations"]
+        job = effective_config(stack, "scheduler")["jobs"]["expire_reservations"]
         return float(job.get("hold_lock_s", 0)) <= 0.2
 
     def solution_steps(self, stack):
@@ -1125,7 +1126,7 @@ class CatalogBadBuildFlag(Fault):
         edit_service_config(stack, "catalog", fn)
 
     def root_cause_fixed(self, stack):
-        flags = read_yaml(config_path(stack, "catalog")).get("build", {}).get("flags") or {}
+        flags = effective_config(stack, "catalog").get("build", {}).get("flags") or {}
         return not flags.get("search_v2")
 
     def solution_steps(self, stack):
@@ -1209,7 +1210,7 @@ class FlagsServiceDown(Fault):
         import yaml
 
         try:
-            doc = read_yaml(config_path(stack, "feature-flags"))
+            doc = effective_flags(stack)
         except yaml.YAMLError:
             return False
         orders = (doc.get("services") or {}).get("orders") or {}
@@ -1570,7 +1571,7 @@ class CacheFullNoEviction(Fault):
         )
 
     def root_cause_fixed(self, stack):
-        c = read_yaml(config_path(stack, "cache"))
+        c = effective_config(stack, "cache")
         return (
             c.get("eviction_policy") != "noeviction"
             or int(c.get("max_memory_bytes", 0)) >= 1_000_000

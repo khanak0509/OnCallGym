@@ -48,7 +48,7 @@ def _episode(fault, seed, action, locked=True):
         sandbox.wipe(user)
         start_with_fault(s, fault, settle=False)
         if locked:
-            sandbox.lock_down(s.home)
+            sandbox.lock_down(s.home, user)
         baseline = Baseline.capture(s)
         time.sleep(fault.settle_s)
         diagnosis = action(s, user)

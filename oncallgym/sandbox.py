@@ -138,7 +138,42 @@ def wipe(user: str):
     )
 
 
-def lock_down(home: str):
+def protect_code(user: str):
+    """Make the code root (northwind/, oncallgym/, training/) unreadable to agent users:
+    only the stack owner, which runs the services and the verifier, may read it. Without
+    this an agent could import the fault definitions or regenerate the pristine configs.
+    Verified by trying as the agent user (some bind mounts ignore modes); raises if the
+    code is still readable."""
+    import northwind
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(northwind.__file__)))
+    if root in _PROTECTED:
+        return root
+    try:
+        os.chmod(root, 0o700)
+    except PermissionError:
+        pass
+    probe = _as_user(
+        user,
+        ["/bin/sh", "-c", f"ls {root}/oncallgym >/dev/null 2>&1 && echo READABLE"],
+        "/",
+        {"PATH": "/usr/bin:/bin"},
+        10,
+    )
+    if b"READABLE" in probe.stdout:
+        raise SandboxUnavailable(
+            f"code at {root} is readable by agent users; keep the repo under an owner-only "
+            "directory (the dev container mounts it at /home/dev/OnCallGym)"
+        )
+    _PROTECTED.add(root)
+    return root
+
+
+_PROTECTED: set[str] = set()
+
+
+def lock_down(home: str, user: str):
+    protect_code(user)
     for root, _dirs, files in os.walk(home):
         rel = os.path.relpath(root, home)
         top = rel.split(os.sep)[0]

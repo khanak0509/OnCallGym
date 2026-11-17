@@ -253,7 +253,7 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
                 "inventory.order-paid": {},
                 # shipments go out in payment order and an order is never dropped
                 "fulfillment.order-paid": {"ordered": True, "max_redeliveries": -1},
-                "notify.events": {},
+                "notify.events": {"max_redeliveries": 8},
             },
         ),
         "cache": base(
@@ -468,7 +468,7 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     os.makedirs(os.path.join(home, "etc/external"), exist_ok=True)
     with open(os.path.join(home, "etc/external/smtp.yaml"), "w") as f:
         f.write("# external mail relay (third party)\n")
-        yaml.safe_dump({"relay": "smtp.mailrelay.example:587", "error_rate": 0.2}, f)
+        yaml.safe_dump({"relay": "smtp.mailrelay.example:587", "error_rate": 0.1}, f)
     with open(os.path.join(home, "etc/feature-flags.yaml"), "w") as f:
         yaml.safe_dump(FLAGS, f, sort_keys=False)
     # deploy tooling keeps the previous release's config for rollbacks

@@ -2,7 +2,7 @@
 
 IMAGE := oncallgym-dev
 DOCKER_RUN := docker run --rm --memory=6g --pids-limit=2048 --cpus=6 \
-	-v $(CURDIR):/workspace -v oncallgym-venv:/opt/venv $(IMAGE)
+	-v $(CURDIR):/home/dev/OnCallGym -v oncallgym-venv:/opt/venv $(IMAGE)
 
 # Northwind must never run directly on a macOS host: on Darwin the stack targets
 # re-run themselves inside the dev container.
@@ -36,12 +36,12 @@ image:
 
 shell: image
 	docker run --rm -it --memory=6g --pids-limit=2048 --cpus=6 \
-		-v $(CURDIR):/workspace -v oncallgym-venv:/opt/venv $(IMAGE) bash
+		-v $(CURDIR):/home/dev/OnCallGym -v oncallgym-venv:/opt/venv $(IMAGE) bash
 
 up:
 ifeq ($(shell uname -s),Darwin)
 	$(MAKE) image >/dev/null && docker run --rm -it --memory=6g --pids-limit=2048 --cpus=6 \
-		-v $(CURDIR):/workspace -v oncallgym-venv:/opt/venv $(IMAGE) \
+		-v $(CURDIR):/home/dev/OnCallGym -v oncallgym-venv:/opt/venv $(IMAGE) \
 		sh -c "uv sync -q && uv run python -m oncallgym.stack up"
 else
 	uv run python -m oncallgym.stack up

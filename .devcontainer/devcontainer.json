@@ -1,8 +1,8 @@
 {
   "name": "oncallgym",
   "build": { "dockerfile": "Dockerfile" },
-  "workspaceFolder": "/workspace",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/home/dev/OnCallGym",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/home/dev/OnCallGym,type=bind",
   "runArgs": ["--memory=6g", "--pids-limit=2048", "--cpus=6"],
   "containerEnv": { "UV_PROJECT_ENVIRONMENT": "/opt/venv" },
   "postCreateCommand": "uv sync",
