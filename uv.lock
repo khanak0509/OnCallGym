@@ -1615,8 +1615,9 @@ wheels = [
 [[package]]
 name = "oncallgym"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
+    { name = "pyyaml" },
     { name = "verifiers" },
 ]
 
@@ -1627,7 +1628,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "verifiers", specifier = "==0.4.1" }]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "verifiers", specifier = "==0.4.1" },
+]
 
 [package.metadata.requires-dev]
 dev = [
