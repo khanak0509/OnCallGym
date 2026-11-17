@@ -28,6 +28,7 @@ VERIFIER_VERSION = "0.1"
 
 PROTECTED_FILES = [
     "etc/provider.yaml",
+    "etc/external/smtp.yaml",
     "etc/trafficgen.yaml",
     "etc/telemetry.yaml",
     "etc/supervisor.yaml",
@@ -200,13 +201,25 @@ def verify(
     baseline: Baseline,
     termination: str = "submitted",
     window_s: float = 8.0,
+    fixed_check=None,
 ) -> Breakdown:
+    """fixed_check(stack) -> bool: the family's check that the root cause itself was
+    changed (effective config/data). R and P require it, so treating only the symptom
+    cannot score."""
     b = Breakdown(termination=termination)
     d = b.details
     probe = Probe(stack)
+    fixed = True
+    if fixed_check is not None:
+        try:
+            fixed = bool(fixed_check(stack))
+        except Exception as e:
+            fixed = False
+            d["root_cause_check_error"] = f"{type(e).__name__}: {e}"[:200]
+    d["root_cause_fixed"] = fixed
 
     if diagnosis:
-        cat_ok = diagnosis.get("root_cause_category") == ground_truth.category
+        cat_ok = ground_truth.category_ok(diagnosis.get("root_cause_category"))
         comp_ok = ground_truth.component_ok(diagnosis.get("component"))
         b.C = float(cat_ok and comp_ok)
         d["root_cause"] = {"category_ok": cat_ok, "component_ok": comp_ok}
@@ -217,7 +230,7 @@ def verify(
     g1 = integrity(stack, baseline)
     traffic_alive = _journeys(stack) > journeys_before >= 0
     g1["trafficgen_alive"] = {"ok": traffic_alive}
-    b.R = float(_recovered(r1))
+    b.R = float(_recovered(r1) and fixed)
 
     t0 = time.time()
     try:
@@ -232,7 +245,7 @@ def verify(
         # same length as R: faults that a restart only hides for a while (leaks) must show
         r2 = probe.run(journeys=1, window_s=window_s)
         d["persistence"] = _compact(r2)
-        b.P = float(_recovered(r2))
+        b.P = float(_recovered(r2) and fixed)
         inv2 = r2["invariants"]
     else:
         d["persistence"] = {"error": "services not ready after restart-all"}

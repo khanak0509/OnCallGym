@@ -113,7 +113,7 @@ def main():
     # the agent's shell commands run as an unprivileged user
     sh(
         f"{vf}/bin/python -c 'from oncallgym.sandbox import ensure_agent_user, mode; "
-        "ensure_agent_user(); print(mode())'",
+        '[ensure_agent_user(f"agent{i}") for i in range(16)]; print(mode("agent0"))\'',
         "sandbox.log",
     )
     traj = WORK / "trajectories"

@@ -7,7 +7,6 @@ Dataset rows carry family, variant and seed (see training/dataset.py).
 """
 
 import functools
-import inspect
 
 from oncallgym.episode import TOOL_NAMES, Episode, Tools
 
@@ -53,11 +52,10 @@ def _make_delegate(name: str):
     target = getattr(Tools, name)
 
     @functools.wraps(target)
-    def method(self, *args, **kwargs):
-        bound = inspect.signature(target).bind(None, *args, **kwargs)
-        bound.apply_defaults()
-        call_args = {k: v for k, v in bound.arguments.items() if k != "self"}
-        return self.episode.call_tool(name, call_args)
+    def method(self, **kwargs):
+        # arguments go to Episode unvalidated, exactly as in the eval path, so bad
+        # arguments cost a turn and are logged the same way
+        return self.episode.call_tool(name, kwargs)
 
     return method
 

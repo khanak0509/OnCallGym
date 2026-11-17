@@ -2,7 +2,6 @@
 
 import json
 import os
-import time
 
 from ..stack import http_json
 from .base import (
@@ -64,7 +63,7 @@ class EdgeWrongUpstreamPort(Fault):
         }[self.params["upstream"]]
         return f"{what} failing for most customers (5xx/404 at the edge) since a few minutes ago."
 
-    def inject(self, stack):
+    def configure(self, stack):
         up = self.params["upstream"]
         port = self.wrong_port(stack)
 
@@ -72,7 +71,52 @@ class EdgeWrongUpstreamPort(Fault):
             doc["upstreams"][up]["url"] = _with_port(doc["upstreams"][up]["url"], port)
 
         edit_service_config(stack, "edge", change)
-        restart_and_wait(stack, "edge")
+
+    def root_cause_fixed(self, stack):
+        up = self.params["upstream"]
+        url = read_yaml(config_path(stack, "edge"))["upstreams"][up]["url"]
+        return _port_of(url) == stack.ports[up]
+
+    def solution_steps(self, stack):
+        up, right = self.params["upstream"], stack.ports[self.params["upstream"]]
+        wrong = self.wrong_port(stack)
+        return [
+            (
+                "logs",
+                {"service": "edge", "tail": 5, "grep": "upstream request failed"},
+                "Customers see errors at the edge. Check what the edge logs.",
+            ),
+            (
+                "topology",
+                {},
+                f"The edge cannot reach {up}. Compare with the port {up} really listens on.",
+            ),
+            (
+                "exec",
+                {"command": "grep -n 'url:' etc/edge.yaml"},
+                "Look at the upstream URLs in the edge config.",
+            ),
+            (
+                "exec",
+                {
+                    "command": f"sed -i '/^  {up}:/,/url:/ s#127.0.0.1:{wrong}#127.0.0.1:"
+                    f"{right}#' etc/edge.yaml && grep -n 'url:' etc/edge.yaml"
+                },
+                f"The {up} upstream points at port {wrong} but {up} listens on {right}. Fix it.",
+            ),
+            ("restart", {"service": "edge"}, "Restart the edge so it reloads its config."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "config",
+                    "component": "edge",
+                    "summary": f"etc/edge.yaml upstream {up} pointed at port "
+                    f"{wrong} instead of {right}; fixed and restarted "
+                    "edge.",
+                },
+                "Requests work again. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         up = self.params["upstream"]
@@ -124,7 +168,7 @@ class OrdersPaymentsTimeoutInversion(Fault):
             "charged for orders that show as failed."
         )
 
-    def inject(self, stack):
+    def configure(self, stack):
         p = self.params
 
         def provider(doc):
@@ -139,8 +183,57 @@ class OrdersPaymentsTimeoutInversion(Fault):
         edit_service_config(stack, "provider", provider)
         edit_service_config(stack, "payments", payments)
         edit_service_config(stack, "orders", orders)
-        for s in ("provider", "payments", "orders"):
-            restart_and_wait(stack, s)
+
+    def root_cause_fixed(self, stack):
+        orders = read_yaml(config_path(stack, "orders"))["upstreams"]["payments"]
+        pay = read_yaml(config_path(stack, "payments"))["upstreams"]["provider"]
+        # the outer call must wait longer than one inner attempt
+        return int(orders["timeout_ms"]) > int(pay["timeout_ms"])
+
+    def solution_steps(self, stack):
+        p = self.params
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "checkout failed"},
+                "Checkouts fail with 504. See why orders fails them.",
+            ),
+            (
+                "logs",
+                {"service": "payments", "tail": 5, "grep": "charge"},
+                "Orders times out calling payments. Does payments itself succeed?",
+            ),
+            (
+                "exec",
+                {
+                    "command": "grep -n -A3 '^  payments:' etc/orders.yaml; "
+                    "grep -n -A3 '^  provider:' etc/payments.yaml"
+                },
+                "Payments succeeds slowly. Compare the two timeouts.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i '/^  payments:/,/timeout_ms/ s/timeout_ms: [0-9]*/"
+                    "timeout_ms: 6000/' etc/orders.yaml && "
+                    "grep -n -A3 '^  payments:' etc/orders.yaml"
+                },
+                f"orders gives up after {p['orders_timeout_ms']} ms while payments waits up to "
+                f"{p['payments_timeout_ms']} ms for the slow provider. Raise orders' timeout.",
+            ),
+            ("restart", {"service": "orders"}, "Restart orders to load the new timeout."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "resilience_config",
+                    "component": "orders",
+                    "summary": "orders->payments timeout was below payments->"
+                    "provider timeout while the provider is slow; "
+                    "raised it to 6000 ms.",
+                },
+                "Checkouts complete again. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         pay = read_yaml(config_path(stack, "payments"))["upstreams"]["provider"]
@@ -184,7 +277,7 @@ class CatalogLeakFlag(Fault):
     def alert(self):
         return "Intermittent errors and timeouts when browsing products; error rate is flapping."
 
-    def inject(self, stack):
+    def configure(self, stack):
         p = self.params
 
         def flags(doc):
@@ -193,6 +286,50 @@ class CatalogLeakFlag(Fault):
             svc["recommendations_cache_kb"] = p["leak_kb"]
 
         edit_yaml(config_path(stack, "feature-flags"), flags)
+
+    def root_cause_fixed(self, stack):
+        flags = read_yaml(config_path(stack, "feature-flags"))
+        merged = {
+            **(flags.get("global") or {}),
+            **((flags.get("services") or {}).get("catalog") or {}),
+        }
+        return not merged.get(self.params["flag"], False)
+
+    def solution_steps(self, stack):
+        flag = self.params["flag"]
+        return [
+            ("list_services", {}, "Browsing flaps. Check service health and restarts."),
+            (
+                "logs",
+                {"service": "supervisor", "tail": 5, "grep": "Out of memory"},
+                "catalog keeps restarting. Was it killed for memory?",
+            ),
+            (
+                "exec",
+                {"command": "cat etc/feature-flags.yaml"},
+                "catalog is OOM-killed repeatedly. Check what changed in its feature flags.",
+            ),
+            (
+                "exec",
+                {
+                    "command": f"sed -i 's/{flag}: true/{flag}: false/' "
+                    "etc/feature-flags.yaml && cat etc/feature-flags.yaml"
+                },
+                f"{flag} is on; it enables new catalog code. Turn it off.",
+            ),
+            ("restart", {"service": "catalog"}, "Restart catalog to free the leaked memory."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "resource_exhaustion",
+                    "component": "catalog",
+                    "summary": f"feature flag {flag} enables leaking catalog "
+                    "code; catalog was OOM-killed in a loop. "
+                    "Disabled the flag.",
+                },
+                "catalog is stable. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         def flags(doc):
@@ -236,15 +373,58 @@ class JwtKeyRotationMismatch(Fault):
     def alert(self):
         return "Customers can log in but every checkout is rejected (401)."
 
-    def inject(self, stack):
-        with open(os.path.join(stack.home, self.key_file()), "w") as f:
+    def configure(self, stack):
+        path = os.path.join(stack.home, self.key_file())
+        with open(path, "w") as f:
             f.write(self.params["key"] + "\n")
 
         def auth(doc):
             doc["signing_key"] = {"kid": self.params["new_kid"], "file": self.key_file()}
 
         edit_service_config(stack, "auth", auth)
-        restart_and_wait(stack, "auth")
+
+    def root_cause_fixed(self, stack):
+        auth_kid = read_yaml(config_path(stack, "auth"))["signing_key"]["kid"]
+        trusted = read_yaml(config_path(stack, "orders"))["auth"]["trusted_keys"]
+        return any(k.get("kid") == auth_kid for k in trusted)
+
+    def solution_steps(self, stack):
+        kid = self.params["new_kid"]
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "token verification failed"},
+                "Checkouts get 401. See why orders rejects tokens.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "grep -n -A2 signing_key etc/auth.yaml; "
+                    "grep -n -A4 trusted_keys etc/orders.yaml; ls etc/keys"
+                },
+                "Unknown signing key. Compare auth's signing key with what orders trusts.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i '/file: etc\\/keys\\/jwt-k-2026-10.key/a\\  - kid: "
+                    f"{kid}\\n    file: etc/keys/jwt-{kid}.key' etc/orders.yaml && "
+                    "grep -n -A6 trusted_keys etc/orders.yaml"
+                },
+                f"auth now signs with {kid}; orders only trusts the old key. Add the new one.",
+            ),
+            ("restart", {"service": "orders"}, "Restart orders to load the trusted keys."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "auth",
+                    "component": "orders",
+                    "summary": f"auth rotated to {kid} but orders did not trust "
+                    "it; added the new key to orders.",
+                },
+                "Checkouts work. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         def orders(doc):
@@ -294,8 +474,8 @@ class PoisonMessage(Fault):
         return "No orders have shipped for several minutes; paid orders are piling up."
 
     def inject(self, stack):
-        st, body = http_json(
-            stack.ports["broker"],
+        st, body = stack.call(
+            "broker",
             "POST",
             "/publish",
             {
@@ -306,6 +486,59 @@ class PoisonMessage(Fault):
         )
         assert st == 200, body
         self.poison_id = body["id"]
+
+    def root_cause_fixed(self, stack):
+        import sqlite3
+
+        c = sqlite3.connect(f"file:{stack.home}/data/broker.db?mode=ro", uri=True, timeout=5)
+        try:
+            row = c.execute(
+                "SELECT e.state FROM entries e JOIN messages m ON m.id=e.msg_id WHERE "
+                "e.queue='fulfillment.order-paid' AND m.request_id='legacy-import'"
+            ).fetchone()
+        finally:
+            c.close()
+        return row is None or row[0] not in ("ready", "inflight")
+
+    def solution_steps(self, stack):
+        b = stack.ports["broker"]
+        q = "fulfillment.order-paid"
+        return [
+            (
+                "logs",
+                {"service": "fulfillment", "tail": 5, "grep": "failed"},
+                "Nothing ships. See what fulfillment logs.",
+            ),
+            (
+                "exec",
+                {"command": f"curl -s 'http://127.0.0.1:{b}/queues/{q}/messages?limit=3'"},
+                "One message fails on every delivery. Look at the head of its queue.",
+            ),
+            (
+                "exec",
+                {
+                    "command": f"curl -s -X POST http://127.0.0.1:{b}/queues/{q}/messages/"
+                    f'{self.poison_id}/dead-letter -d \'{{"reason": "poison '
+                    "message, malformed order.paid\"}'"
+                },
+                "The head message is malformed and blocks the ordered queue. Dead-letter it.",
+            ),
+            (
+                "logs",
+                {"service": "fulfillment", "tail": 3, "grep": "shipment created"},
+                "Check that shipments resume.",
+            ),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "data",
+                    "component": "fulfillment",
+                    "summary": "a malformed order.paid message blocked the "
+                    "ordered fulfillment queue; moved it to the DLQ.",
+                },
+                "Shipments flow again. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         q = "fulfillment.order-paid"
@@ -347,14 +580,56 @@ class WrongDatabasePath(Fault):
         what = {"inventory": "Checkout", "payments": "Checkout", "catalog": "Product browsing"}
         return f"{what[self.params['service']]} failing with 5xx errors for all customers."
 
-    def inject(self, stack):
+    def configure(self, stack):
         wrong = self.params["wrong"]
         if wrong.startswith("/var/lib"):
             # absolute path into a directory that does not exist inside the episode
             wrong = "data/missing-volume/" + os.path.basename(wrong)
             self.params["wrong"] = wrong
         edit_service_config(stack, self.params["service"], lambda d: d["db"].update(path=wrong))
-        restart_and_wait(stack, self.params["service"], timeout_s=8)
+
+    def root_cause_fixed(self, stack):
+        path = read_yaml(config_path(stack, self.params["service"]))["db"]["path"]
+        full = path if os.path.isabs(path) else os.path.join(stack.home, path)
+        return os.path.realpath(full) == os.path.realpath(
+            os.path.join(stack.home, f"data/{self.params['db']}.db")
+        )
+
+    def solution_steps(self, stack):
+        p = self.params
+        svc, db = p["service"], p["db"]
+        return [
+            ("list_services", {}, "Customers get 5xx. Check which services are healthy."),
+            (
+                "logs",
+                {"service": svc, "tail": 5, "grep": "error"},
+                f"{svc} is not ready. See its errors.",
+            ),
+            (
+                "exec",
+                {"command": f"grep -n -A3 '^db:' etc/{svc}.yaml; ls data/"},
+                f"{svc} finds no tables. Check which database file it opens.",
+            ),
+            (
+                "exec",
+                {
+                    "command": f"sed -i 's#path: {p['wrong']}#path: data/{db}.db#' "
+                    f"etc/{svc}.yaml && grep -n -A3 '^db:' etc/{svc}.yaml"
+                },
+                f"It points at {p['wrong']}; the real database is data/{db}.db. Fix the path.",
+            ),
+            ("restart", {"service": svc}, f"Restart {svc}."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "config",
+                    "component": svc,
+                    "summary": f"etc/{svc}.yaml db.path pointed at {p['wrong']}; "
+                    f"set it back to data/{db}.db.",
+                },
+                f"{svc} is ready. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         db = self.params["db"]
@@ -386,7 +661,7 @@ class EdgeRateLimitTooLow(Fault):
     def alert(self):
         return "Customers getting 'Too Many Requests' (429) on most pages."
 
-    def inject(self, stack):
+    def configure(self, stack):
         edit_service_config(
             stack,
             "edge",
@@ -394,7 +669,42 @@ class EdgeRateLimitTooLow(Fault):
                 rate_limit={"rps": self.params["rps"], "burst": self.params["burst"]}
             ),
         )
-        restart_and_wait(stack, "edge")
+
+    def root_cause_fixed(self, stack):
+        rl = read_yaml(config_path(stack, "edge")).get("rate_limit") or {}
+        return float(rl.get("rps", 40)) >= 5 and float(rl.get("burst", 80)) >= 5
+
+    def solution_steps(self, stack):
+        return [
+            (
+                "logs",
+                {"service": "edge", "tail": 5, "grep": "rate limit"},
+                "Customers get 429. Check the edge.",
+            ),
+            (
+                "exec",
+                {"command": "grep -n -A2 rate_limit etc/edge.yaml"},
+                "The edge rate-limits nearly everything. Check the limit.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/^  rps: .*/  rps: 20/; s/^  burst: .*/  burst: 40/' "
+                    "etc/edge.yaml && grep -n -A2 rate_limit etc/edge.yaml"
+                },
+                f"The limit is {self.params['rps']} requests/s per client. Restore 20/s, burst 40.",
+            ),
+            ("restart", {"service": "edge"}, "Restart the edge."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "config",
+                    "component": "edge",
+                    "summary": "edge rate_limit was set near zero; restored rps 20 burst 40.",
+                },
+                "Requests pass again. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         edit_service_config(stack, "edge", lambda d: d.update(rate_limit={"rps": 20, "burst": 40}))
@@ -428,12 +738,59 @@ class FulfillmentWrongTopic(Fault):
     def alert(self):
         return "Orders are paid but none have shipped for several minutes."
 
-    def inject(self, stack):
-        self.injected_at = time.time()
+    def configure(self, stack):
         edit_service_config(
             stack, "fulfillment", lambda d: d["consumer"].update(topic=self.params["topic"])
         )
-        restart_and_wait(stack, "fulfillment")
+
+    def root_cause_fixed(self, stack):
+        consumer = read_yaml(config_path(stack, "fulfillment"))["consumer"]
+        return consumer.get("topic") == "order.paid"
+
+    def solution_steps(self, stack):
+        b = stack.ports["broker"]
+        return [
+            (
+                "logs",
+                {"service": "fulfillment", "tail": 5, "grep": "subscribed"},
+                "Paid orders are not shipped. What does fulfillment consume?",
+            ),
+            (
+                "exec",
+                {"command": f"curl -s http://127.0.0.1:{b}/queues"},
+                "Check which topics each queue is bound to.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/topic: .*/topic: order.paid/' "
+                    "etc/fulfillment.yaml && grep -n -A3 consumer "
+                    "etc/fulfillment.yaml"
+                },
+                f"fulfillment subscribes to {self.params['topic']}, but orders publishes "
+                "order.paid. Fix the topic.",
+            ),
+            ("restart", {"service": "fulfillment"}, "Restart fulfillment to resubscribe."),
+            (
+                "exec",
+                {
+                    "command": f"curl -s -X POST http://127.0.0.1:{b}/queues/"
+                    "fulfillment.order-paid/backfill -d "
+                    '\'{"topic": "order.paid", "since_s": 3600}\''
+                },
+                "Events published meanwhile never reached the queue. Backfill them.",
+            ),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "config",
+                    "component": "fulfillment",
+                    "summary": "fulfillment consumer topic was misspelled; set "
+                    "order.paid and backfilled missed events.",
+                },
+                "Orders ship again. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         edit_service_config(
@@ -481,7 +838,7 @@ class PaymentsBreakerStuckOpen(Fault):
     def alert(self):
         return "Checkout failing for most customers (502/503); payment provider status is green."
 
-    def inject(self, stack):
+    def configure(self, stack):
         p = self.params
         edit_service_config(stack, "provider", lambda d: d.update(error_rate=p["error_rate"]))
 
@@ -493,8 +850,53 @@ class PaymentsBreakerStuckOpen(Fault):
             }
 
         edit_service_config(stack, "payments", payments)
-        restart_and_wait(stack, "provider")
-        restart_and_wait(stack, "payments")
+
+    def root_cause_fixed(self, stack):
+        b = read_yaml(config_path(stack, "payments"))["upstreams"]["provider"].get("breaker")
+        if not b:
+            return True  # no breaker at all is a (blunt) valid choice
+        return int(b.get("failure_threshold", 5)) >= 3 and float(b.get("reset_timeout_s", 5)) <= 60
+
+    def solution_steps(self, stack):
+        return [
+            (
+                "logs",
+                {"service": "orders", "tail": 5, "grep": "checkout failed"},
+                "Checkouts fail. See why.",
+            ),
+            (
+                "logs",
+                {"service": "payments", "tail": 5, "grep": "breaker"},
+                "payments reports the provider breaker as open. Check when it opens.",
+            ),
+            (
+                "exec",
+                {"command": "grep -n -A4 breaker etc/payments.yaml"},
+                "The provider mostly works, yet the breaker stays open. Check its settings.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/failure_threshold: 1$/failure_threshold: 8/; "
+                    "s/reset_timeout_s: [0-9]*/reset_timeout_s: 5/; "
+                    "s/window_s: 60$/window_s: 10/' etc/payments.yaml && "
+                    "grep -n -A4 breaker etc/payments.yaml"
+                },
+                "It opens on a single failure and stays open for minutes. Restore sane values.",
+            ),
+            ("restart", {"service": "payments"}, "Restart payments."),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "resilience_config",
+                    "component": "payments",
+                    "summary": "payments circuit breaker opened on 1 failure "
+                    "with a long reset; restored threshold 8, "
+                    "reset 5 s.",
+                },
+                "Charges go through again. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         def payments(doc):
@@ -520,6 +922,9 @@ class NotifyDeadLetters(Fault):
     breaks = ("liveness",)  # dead-lettered emails for real orders
     settle_s = 15.0
 
+    # max_redeliveries is a retry setting as much as a queue setting
+    also_accepted_categories = ("resilience_config",)
+
     def choose_params(self, rng):
         return {"max_redeliveries": 0}
 
@@ -536,12 +941,61 @@ class NotifyDeadLetters(Fault):
     def alert(self):
         return "Customers report missing order confirmation and shipping emails."
 
-    def inject(self, stack):
+    def configure(self, stack):
         def broker(doc):
             doc["queues"]["notify.events"] = {"max_redeliveries": 0}
 
         edit_service_config(stack, "broker", broker)
-        restart_and_wait(stack, "broker")
+
+    def root_cause_fixed(self, stack):
+        q = (read_yaml(config_path(stack, "broker")).get("queues") or {}).get("notify.events")
+        return int((q or {}).get("max_redeliveries", 5)) != 0
+
+    def solution_steps(self, stack):
+        b = stack.ports["broker"]
+        return [
+            (
+                "logs",
+                {"service": "broker", "tail": 5, "grep": "dead-letter"},
+                "Emails are missing. Check whether notify's events are being dropped.",
+            ),
+            (
+                "exec",
+                {
+                    "command": f"curl -s http://127.0.0.1:{b}/queues; grep -n -A8 '^queues:' "
+                    "etc/broker.yaml"
+                },
+                "Events go straight to the DLQ. Check the queue's redelivery setting.",
+            ),
+            (
+                "exec",
+                {
+                    "command": "sed -i 's/max_redeliveries: 0$/max_redeliveries: 5/' "
+                    "etc/broker.yaml && grep -n -A8 '^queues:' etc/broker.yaml"
+                },
+                "notify.events allows 0 redeliveries, so every relay hiccup dead-letters. "
+                "Allow retries again.",
+            ),
+            ("restart", {"service": "broker"}, "Restart the broker."),
+            (
+                "exec",
+                {
+                    "command": f"curl -s -X POST http://127.0.0.1:{b}/queues/"
+                    "notify.events/dlq/replay"
+                },
+                "Replay the dead-lettered emails so customers get them.",
+            ),
+            (
+                "submit_diagnosis",
+                {
+                    "root_cause_category": "data",
+                    "component": "broker",
+                    "summary": "notify.events max_redeliveries was 0; restored "
+                    "5 and replayed the DLQ.",
+                },
+                "Emails are delivered. Submit.",
+            ),
+        ]
 
     def oracle(self, stack):
         def broker(doc):

@@ -24,6 +24,7 @@ import time
 
 from . import sandbox
 from .faults import CATEGORIES, make_fault
+from .faults.base import configure_quietly
 from .prompt import system_prompt, task_prompt
 from .stack import Stack, http_json
 from .verifier import VERIFIER_VERSION, Baseline, Breakdown, verify
@@ -108,7 +109,12 @@ class Tools:
         Returns:
             Exit code and combined stdout/stderr.
         """
-        r = sandbox.run(command, cwd=self._ep.stack.home, timeout_s=LIMITS["exec_timeout_s"])
+        r = sandbox.run(
+            self._ep.agent_user,
+            command,
+            cwd=self._ep.stack.home,
+            timeout_s=LIMITS["exec_timeout_s"],
+        )
         status = "timed out" if r["timed_out"] else f"exit {r['exit_code']}"
         return f"[{status}]\n{r['output']}"
 
@@ -118,7 +124,7 @@ class Tools:
         Args:
             service: Service name, e.g. "orders".
             tail: Number of most recent matching lines to show (max 50).
-            grep: Optional text or regular expression; only matching lines are shown.
+            grep: Optional text; only lines containing it (case-insensitive) are shown.
 
         Returns:
             Matching log lines, oldest first.
@@ -137,11 +143,10 @@ class Tools:
         except OSError:
             return f"no log file for {service}"
         if grep:
-            try:
-                rx = re.compile(grep, re.IGNORECASE)
-                lines = [ln for ln in lines if rx.search(ln)]
-            except re.error:
-                lines = [ln for ln in lines if grep.lower() in ln.lower()]
+            # plain case-insensitive substring (no regex: a pathological pattern must not
+            # hang the episode)
+            needle = str(grep)[:200].lower()
+            lines = [ln for ln in lines if needle in ln.lower()]
         else:
             # access lines dominate; drop the successful ones unless asked for
             lines = [ln for ln in lines if "type=access" not in ln or " status=2" not in ln]
@@ -294,7 +299,10 @@ class Episode:
     ):
         self.fault = make_fault(family, variant)
         self.seed = variant if seed is None else seed
-        self.count_tokens = count_tokens or approx_tokens
+        # the budget always uses the same estimator so training and eval end episodes at
+        # the same point; count_tokens is accepted for logging only
+        self.count_tokens = approx_tokens
+        self.real_count_tokens = count_tokens
         self.stack = Stack(seed=self.seed, root=root)
         self.tools = Tools(self)
         self.turn_limit = self.fault.turn_limit
@@ -310,9 +318,12 @@ class Episode:
     # lifecycle
     def start(self) -> list[dict]:
         self.started_at = time.time()
-        sandbox.ensure_agent_user()
         self.stack.create()
-        self.stack.start()
+        self.agent_user = sandbox.agent_user(self.stack.block)
+        sandbox.ensure_agent_user(self.agent_user)
+        sandbox.wipe(self.agent_user)
+        configure_quietly(self.stack, self.fault)
+        self.stack.start(timeout_s=45, require_ready=False)
         time.sleep(2)
         self.fault.inject(self.stack)
         sandbox.lock_down(self.stack.home)
@@ -384,6 +395,7 @@ class Episode:
                 self._diagnosis,
                 self.baseline,
                 termination=self.termination,
+                fixed_check=self.fault.root_cause_fixed,
             )
         except Exception as e:
             b = Breakdown(
@@ -398,6 +410,11 @@ class Episode:
         return b
 
     def close(self):
+        if getattr(self, "agent_user", None):
+            try:
+                sandbox.wipe(self.agent_user)
+            except Exception:
+                pass
         self.stack.cleanup()
 
     def _log(self, kind: str, **fields):

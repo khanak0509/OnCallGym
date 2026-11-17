@@ -19,9 +19,11 @@ import os
 import sys
 import time
 
-from .cheats import GENERIC_CHEATS
+from . import sandbox
+from .cheats import AGENT_CHEATS, GENERIC_CHEATS
 from .faults import FAMILIES, make_fault
-from .probes import Probe
+from .faults.base import start_with_fault
+from .probes import LIVENESS_INVARIANTS, Probe
 from .stack import Stack, leftover_processes
 from .verifier import Baseline, verify
 
@@ -35,16 +37,28 @@ def _diag(fault):
     }
 
 
-def _episode(fault, seed, action):
-    """Fresh stack, inject, run `action(stack)` -> diagnosis, verify. Returns breakdown."""
-    with Stack(seed=seed) as s:
-        time.sleep(2)
-        fault.inject(s)
+def _episode(fault, seed, action, locked=True):
+    """Fresh stack with the fault, run `action(stack, agent_user)` -> diagnosis, verify."""
+    s = Stack(seed=seed)
+    user = None
+    try:
+        s.create()
+        user = sandbox.agent_user(s.block)
+        sandbox.ensure_agent_user(user)
+        sandbox.wipe(user)
+        start_with_fault(s, fault, settle=False)
+        if locked:
+            sandbox.lock_down(s.home)
         baseline = Baseline.capture(s)
         time.sleep(fault.settle_s)
-        diagnosis = action(s)
-        b = verify(s, fault.ground_truth, diagnosis, baseline)
-    return b
+        diagnosis = action(s, user)
+        return verify(
+            s, fault.ground_truth, diagnosis, baseline, fixed_check=fault.root_cause_fixed
+        )
+    finally:
+        if user:
+            sandbox.wipe(user)
+        s.cleanup()
 
 
 def _healthy_then_broken(family, variant, seed):
@@ -52,14 +66,15 @@ def _healthy_then_broken(family, variant, seed):
     with Stack(seed=seed) as s:
         time.sleep(2)
         healthy = Probe(s).run(journeys=1, window_s=4)
-        c1 = {"ok": healthy["passed"]}
-        if not healthy["passed"]:
-            c1["detail"] = healthy
-        fault.inject(s)
-        time.sleep(fault.settle_s)
+    c1 = {"ok": healthy["passed"]}
+    if not healthy["passed"]:
+        c1["detail"] = healthy
+    s = Stack(seed=seed)
+    try:
+        start_with_fault(s, fault)
         broken = Probe(s).run(journeys=1, window_s=6)
-    from .probes import LIVENESS_INVARIANTS
-
+    finally:
+        s.cleanup()
     parts = {
         "journeys": not all(j["ok"] for j in broken["journeys"]),
         "window": not broken["recovery_window"]["ok"],
@@ -80,7 +95,42 @@ def _healthy_then_broken(family, variant, seed):
 def _run_episode(family, variant, seed, action):
     """action(stack, fault) -> diagnosis"""
     f = make_fault(family, variant)
-    return _episode(f, seed, lambda s: action(s, f))
+    return _episode(f, seed, lambda s, user: action(s, f))
+
+
+def _solve_with_tools(family, variant, seed):
+    """Play the family's scripted solution through the real Episode tools (sandboxed
+    agent user, same limits). Proves the task is solvable with the agent's permissions."""
+    from .episode import Episode
+
+    ep = Episode(family, variant, seed)
+    try:
+        ep.start()
+        outputs = []
+        for tool, args, _thought in ep.fault.solution_steps(ep.stack):
+            outputs.append((tool, ep.call_tool(tool, args)[:300]))
+            if ep.done:
+                break
+        b = ep.finish()
+        return b, outputs, ep.termination
+    finally:
+        ep.close()
+
+
+def _run_agent_cheat(family, variant, seed, fn):
+    """Agent-level cheat through the sandbox. Returns (breakdown, error or None)."""
+    f = make_fault(family, variant)
+    err = {}
+
+    def act(s, user):
+        try:
+            fn(s, f, user)
+        except AssertionError as e:
+            err["e"] = str(e)[:300]
+        time.sleep(2)
+        return _diag(f)
+
+    return _episode(f, seed, act), err.get("e")
 
 
 def _act_oracle(s, f):
@@ -131,11 +181,15 @@ def validate_variant(
             "oracle": ex.submit(_run_episode, family, variant, seed, _act_oracle),
             "nothing": ex.submit(_run_episode, family, variant, seed, _act_nothing),
             "restart": ex.submit(_run_episode, family, variant, seed, _act_restart_all),
+            "tools": ex.submit(_solve_with_tools, family, variant, seed),
         }
         for name, fn in cheat_fns.items():
             futs[f"cheat:{name}"] = ex.submit(
                 _run_episode, family, variant, seed, cheat_action(name, fn)
             )
+        if cheats:
+            for name, fn in AGENT_CHEATS.items():
+                futs[f"agent:{name}"] = ex.submit(_run_agent_cheat, family, variant, seed, fn)
         res = {k: f.result() for k, f in futs.items()}
 
     checks.update(res["12"])
@@ -150,6 +204,13 @@ def validate_variant(
         "details": b.details if not b.solved else None,
     }
     checks["7_invariants_after_oracle"] = {"ok": b.G == 1.0}
+    b, outputs, term = res["tools"]
+    checks["9_solvable_with_tools"] = {
+        "ok": b.solved and b.reward >= 0.99,
+        "reward": b.reward,
+        "termination": term,
+        "details": None if b.solved else {"breakdown": b.details, "outputs": outputs},
+    }
     b = res["nothing"]
     checks["4_do_nothing"] = {"ok": b.reward <= 0.05, "reward": b.reward, "R": b.R, "G": b.G}
     b = res["restart"]
@@ -170,6 +231,21 @@ def validate_variant(
                 "reward": b.reward,
                 "tripped": list(integ) if isinstance(integ, dict) else [],
             }
+        agent = {}
+        for name in AGENT_CHEATS:
+            b, err = res[f"agent:{name}"]
+            gained = b.R == 1.0 and b.G == 1.0
+            agent[name] = {
+                "error": err,
+                "R": b.R,
+                "G": b.G,
+                "reward": b.reward,
+                "ok": err is None and not gained,
+            }
+        checks["6b_agent_cheats_blocked"] = {
+            "ok": all(a["ok"] for a in agent.values()),
+            "cheats": agent,
+        }
         checks["6_cheats_blocked"] = {
             "ok": all(r["G"] == 0.0 for r in results.values() if r["applied"]),
             "cheats": results,

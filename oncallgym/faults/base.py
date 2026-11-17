@@ -4,7 +4,8 @@ A fault family describes one kind of production incident. A variant (family + va
 number) fixes the random parameters, so episodes are reproducible.
 
     f = make_fault("edge_wrong_upstream_port", variant=3)
-    f.inject(stack)        # after the stack is up and healthy
+    f.configure(stack)     # file changes, before the stack starts
+    stack.start(); f.inject(stack)   # runtime part, if any
     f.oracle(stack)        # scripted fix, using only what the agent can do
     f.ground_truth         # hidden from the agent
 
@@ -41,6 +42,11 @@ class GroundTruth:
     # other components that are an equally defensible answer for this fault (documented
     # per family); the root-cause check accepts any of them
     also_accepted: tuple[str, ...] = ()
+    also_accepted_categories: tuple[str, ...] = ()
+
+    def category_ok(self, answer: str) -> bool:
+        a = (answer or "").strip().lower()
+        return a == self.category or a in self.also_accepted_categories
 
     def component_ok(self, answer: str) -> bool:
         a = (answer or "").strip().lower()
@@ -70,10 +76,22 @@ class Fault:
         raise NotImplementedError
 
     also_accepted: tuple[str, ...] = ()
+    also_accepted_categories: tuple[str, ...] = ()
 
     @property
     def ground_truth(self) -> GroundTruth:
-        return GroundTruth(self.category, self.component, self.describe(), self.also_accepted)
+        return GroundTruth(
+            self.category,
+            self.component,
+            self.describe(),
+            self.also_accepted,
+            self.also_accepted_categories,
+        )
+
+    def root_cause_fixed(self, stack) -> bool:
+        """Family check on the effective configuration/data that the cause itself was
+        changed (not just its symptom hidden). Part of Recovery."""
+        raise NotImplementedError
 
     @property
     def turn_limit(self) -> int:
@@ -86,8 +104,12 @@ class Fault:
         """What the pager says: symptoms only, never the cause."""
         raise NotImplementedError
 
+    def configure(self, stack):
+        """File-level part of the fault, applied after provisioning and before the stack
+        starts (so no restart counts, restart log lines or new mtimes give it away)."""
+
     def inject(self, stack):
-        raise NotImplementedError
+        """Runtime part of the fault, applied to the running stack (e.g. a bad message)."""
 
     def oracle(self, stack):
         raise NotImplementedError
@@ -128,6 +150,39 @@ def edit_yaml(path: str, fn):
 
 def edit_service_config(stack, service: str, fn):
     edit_yaml(config_path(stack, service), fn)
+
+
+def configure_quietly(stack, fault):
+    """Apply fault.configure() and restore every etc/ file's timestamps afterwards, so the
+    injected change cannot be found by sorting files by modification time."""
+    etc = os.path.join(stack.home, "etc")
+    times = {}
+    for root, _dirs, files in os.walk(etc):
+        for f in files:
+            p = os.path.join(root, f)
+            st = os.stat(p)
+            times[p] = (st.st_atime, st.st_mtime)
+    ref = max((t for t in times.values()), key=lambda t: t[1], default=None)
+    fault.configure(stack)
+    for root, _dirs, files in os.walk(etc):
+        for f in files:
+            p = os.path.join(root, f)
+            t = times.get(p, ref)  # new files get the provisioning time too
+            if t:
+                os.utime(p, t)
+
+
+def start_with_fault(stack, fault, settle: bool = True):
+    """create -> configure -> start -> inject -> (settle). Returns the stack."""
+    if not stack.ports:
+        stack.create()
+    configure_quietly(stack, fault)
+    stack.start(timeout_s=45, require_ready=False)
+    time.sleep(2)
+    fault.inject(stack)
+    if settle:
+        time.sleep(fault.settle_s)
+    return stack
 
 
 def restart_and_wait(stack, service: str, timeout_s: float = 20.0) -> bool:

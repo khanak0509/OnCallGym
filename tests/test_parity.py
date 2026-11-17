@@ -36,8 +36,9 @@ def test_trl_delegate_forwards_args():
 
     env = OnCallEnv()
     env.episode = FakeEpisode()
-    assert env.logs("orders", grep="error") == "ok"
-    assert calls == [("logs", {"service": "orders", "tail": 20, "grep": "error"})]
+    assert env.logs(service="orders", grep="error") == "ok"
+    assert env.logs(nonsense=1) == "ok"
+    assert calls == [("logs", {"service": "orders", "grep": "error"}), ("logs", {"nonsense": 1})]
 
 
 def test_verifiers_toolset_serves_core_schemas():
@@ -63,3 +64,33 @@ def test_verifiers_task_prompt_is_core_prompt():
         f = make_fault(t.data.family, t.data.variant)
         assert t.data.system_prompt == system_prompt()
         assert t.data.prompt == task_prompt(f.alert(), f.turn_limit)
+
+
+def test_trl_dataset_prompt_is_core_prompt():
+    from oncallgym.faults import make_fault
+    from training.dataset import build_rows
+
+    rows = build_rows("train", variants=range(2))
+    assert rows
+    for r in rows:
+        f = make_fault(r["family"], r["variant"])
+        assert r["prompt"][0]["content"] == system_prompt()
+        assert r["prompt"][1]["content"] == task_prompt(f.alert(), f.turn_limit)
+
+
+def test_trl_rendered_schemas_match_core():
+    """TRL renders tool schemas with transformers' parser; they must equal ours."""
+    import pytest
+
+    tu = pytest.importorskip("transformers.utils")
+    for s in tool_schemas():
+        name = s["function"]["name"]
+        trl = tu.get_json_schema(getattr(OnCallEnv, name))
+        assert trl["function"]["name"] == name
+        assert (
+            trl["function"]["parameters"].get("required", [])
+            == (s["function"]["parameters"]["required"])
+        )
+        assert set(trl["function"]["parameters"]["properties"]) == set(
+            s["function"]["parameters"]["properties"]
+        )
