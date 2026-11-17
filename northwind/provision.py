@@ -249,7 +249,12 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
             "broker",
             db="data/broker.db",
             defaults={"max_redeliveries": 5, "redelivery_delay_ms": 500, "ordered": False},
-            queues={"inventory.order-paid": {}, "fulfillment.order-paid": {}, "notify.events": {}},
+            queues={
+                "inventory.order-paid": {},
+                # shipments go out in payment order and an order is never dropped
+                "fulfillment.order-paid": {"ordered": True, "max_redeliveries": -1},
+                "notify.events": {},
+            },
         ),
         "cache": base(
             "cache", max_memory_bytes=4_000_000, eviction_policy="allkeys-lru", default_ttl_s=60
@@ -354,7 +359,7 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
                 "orders": {"url": url("orders"), "timeout_ms": 8000, "pool_size": 16},
             },
             routes=[
-                {"prefix": "/api/auth/", "upstream": "auth", "rewrite": "/"},
+                {"prefix": "/api/auth/login", "upstream": "auth", "rewrite": "/login"},
                 {"prefix": "/api/catalog/", "upstream": "catalog", "rewrite": "/"},
                 {"prefix": "/api/orders/", "upstream": "orders", "rewrite": "/orders/"},
                 {"prefix": "/api/checkout", "upstream": "orders", "rewrite": "/checkout"},
@@ -438,7 +443,8 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     p = ports(base_port)
     for d in ("etc/env", "etc/keys", "etc/tls", "data/outbox", "data/seed", "logs", "run"):
         os.makedirs(os.path.join(home, d), exist_ok=True)
-    os.makedirs(private, exist_ok=True)
+    os.makedirs(private, mode=0o700, exist_ok=True)
+    os.chmod(private, 0o700)
 
     for name, cfg in service_configs(p, seed).items():
         with open(os.path.join(home, f"etc/{name}.yaml"), "w") as f:
@@ -470,7 +476,8 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     for i in range(1, N_USERS + 1):
         name = f"{rng.choice(FIRST)} {rng.choice(LAST)}"
         email = f"{name.split()[0].lower()}.{i}@example.com"
-        password = rng.randbytes(6).hex()
+        # probe users get unguessable passwords (not derivable from the public seed)
+        password = os.urandom(6).hex() if i > N_USERS - N_PROBE_USERS else rng.randbytes(6).hex()
         salt = rng.randbytes(4).hex()
         addr = f"{rng.randint(1, 400)} {rng.choice(STREETS)}, Springfield"
         users.append({"id": i, "email": email, "password": password})
@@ -501,7 +508,12 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     probe_users = users[N_USERS - N_PROBE_USERS :]
     with open(os.path.join(home, "data/seed/manifest.json"), "w") as f:
         json.dump({"seed": seed, "traffic_users": traffic_users, "skus": skus}, f)
-    with open(os.path.join(private, "verifier.json"), "w") as f:
+    with open(
+        os.open(
+            os.path.join(private, "verifier.json"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
+        ),
+        "w",
+    ) as f:
         json.dump(
             {
                 "seed": seed,

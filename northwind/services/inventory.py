@@ -106,17 +106,39 @@ def main():
     def commit(req):
         return 200, {"committed": finish(req.params["order_id"], "committed")}
 
+    def commit_expired(order_id: str) -> int:
+        """The order was paid after its reservation expired (released stock). Ship anyway:
+        take the stock now. Fails (CHECK on_hand >= 0) if it was sold out meanwhile."""
+        now = time.time()
+        with db.tx() as c:
+            rows = c.execute(
+                "SELECT id, sku, qty FROM reservations WHERE order_id=? AND status='expired'",
+                (order_id,),
+            ).fetchall()
+            for r in rows:
+                c.execute(
+                    "UPDATE stock SET on_hand = on_hand - ? WHERE sku=?", (r["qty"], r["sku"])
+                )
+                c.execute(
+                    "UPDATE reservations SET status='committed', updated_at=? WHERE id=?",
+                    (now, r["id"]),
+                )
+        return len(rows)
+
     def on_order_paid(msg):
         order_id = msg["payload"]["order_id"]
-        n = finish(order_id, "committed")
-        if n == 0:
-            r = db.one("SELECT status FROM reservations WHERE order_id=? LIMIT 1", (order_id,))
-            if r is None or r["status"] != "committed":
-                svc.log.warn(
-                    "paid order has no held reservation", order=order_id, status=r and r["status"]
-                )
-        else:
+        if finish(order_id, "committed"):
             svc.metrics.inc("inventory_reservations_total", outcome="committed")
+            return
+        if commit_expired(order_id):
+            svc.metrics.inc("inventory_reservations_total", outcome="committed_after_expiry")
+            svc.log.warn(
+                "reservation had expired before payment; committed stock now", order=order_id
+            )
+            return
+        r = db.one("SELECT status FROM reservations WHERE order_id=? LIMIT 1", (order_id,))
+        if r is None or r["status"] != "committed":
+            svc.log.warn("paid order has no reservation", order=order_id, status=r and r["status"])
 
     bcfg = svc.config["consumer"]
     consumer = Consumer(svc, svc.upstream("broker"), bcfg["queue"], bcfg["topics"], on_order_paid)

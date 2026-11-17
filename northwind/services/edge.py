@@ -2,7 +2,7 @@
 per-route timeouts, TLS to auth.
 
 etc/edge.yaml:
-  routes: [{prefix: /api/auth/, upstream: auth, rewrite: /}]
+  routes: [{prefix: /api/auth/login, upstream: auth, rewrite: /login}]
   rate_limit: {rps: 40, burst: 80}   # per client (X-Client-Id header, else peer address)
 """
 

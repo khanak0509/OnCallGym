@@ -94,35 +94,55 @@ def main():
 
     @svc.app.route("POST", "/refunds")
     def refund(req):
+        """Refund every successful provider charge for an order. The provider is the source
+        of truth: a charge can have succeeded there even if our attempt timed out."""
         order_id = req.json.get("order_id")
         require(order_id, 400, "order_id required")
-        ch = db.one("SELECT * FROM charges WHERE order_id=? AND status='succeeded'", (order_id,))
-        require(ch, 404, "no succeeded charge for order")
         try:
-            r = provider.post("/v1/refunds", {"charge_id": ch["provider_charge_id"]})
+            r = provider.get(f"/v1/charges?merchant_ref={order_id}")
         except UpstreamError as e:
             return 502, {"error": f"payment provider {e.kind}"}
         if not r.ok:
             return 502, {"error": f"payment provider returned {r.status}"}
-        rf = r.json()
-        with db.tx() as c:
-            c.execute(
-                "INSERT OR IGNORE INTO refunds VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    "rf_" + secrets.token_hex(8),
-                    ch["id"],
-                    order_id,
-                    ch["amount_cents"],
-                    rf["id"],
-                    time.time(),
-                ),
+        remote = [c for c in r.json().get("charges", []) if c["status"] == "succeeded"]
+        refunded = []
+        for pc in remote:
+            try:
+                rr = provider.post("/v1/refunds", {"charge_id": pc["id"]})
+            except UpstreamError as e:
+                return 502, {"error": f"payment provider {e.kind}", "refunded": refunded}
+            if not rr.ok:
+                return 502, {"error": f"provider refund returned {rr.status}"}
+            now = time.time()
+            with db.tx() as c:
+                if not c.execute(
+                    "SELECT 1 FROM refunds WHERE provider_refund_id=?", (rr.json()["id"],)
+                ).fetchone():
+                    c.execute(
+                        "INSERT INTO refunds VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            "rf_" + secrets.token_hex(8),
+                            pc["id"],
+                            order_id,
+                            pc["amount_cents"],
+                            rr.json()["id"],
+                            now,
+                        ),
+                    )
+                c.execute(
+                    "UPDATE charges SET status='refunded', provider_charge_id=?, updated_at=? "
+                    "WHERE order_id=?",
+                    (pc["id"], now, order_id),
+                )
+            refunded.append(pc["id"])
+        if refunded:
+            svc.log.info(
+                "refund issued",
+                req=req.request_id,
+                order=order_id,
+                provider_charges=",".join(refunded),
             )
-            c.execute(
-                "UPDATE charges SET status='refunded', updated_at=? WHERE id=?",
-                (time.time(), ch["id"]),
-            )
-        svc.log.info("refund issued", req=req.request_id, order=order_id, charge=ch["id"])
-        return 200, {"refunded": True, "order_id": order_id}
+        return 200, {"order_id": order_id, "refunded": len(refunded), "charged": len(remote) > 0}
 
     @svc.app.route("GET", "/charges")
     def list_charges(req):

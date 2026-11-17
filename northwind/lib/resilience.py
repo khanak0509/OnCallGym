@@ -44,6 +44,12 @@ class CircuitBreaker:
                 self._trials += 1
             return True
 
+    def release_trial(self):
+        """Give back a half-open trial slot when the call never reached the upstream."""
+        with self._lock:
+            if self.state == HALF_OPEN and self._trials > 0:
+                self._trials -= 1
+
     def success(self):
         with self._lock:
             if self.state == HALF_OPEN:

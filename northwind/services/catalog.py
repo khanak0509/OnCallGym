@@ -16,6 +16,23 @@ def main():
     ttl = int(ccfg.get("ttl_s", 30))
     cols = "sku, name, category, description, price_cents"
 
+    # recommendations v2 (behind a flag): related products computed per request and kept
+    # in an in-process "session history" that is never trimmed
+    history: list = []
+    svc.metrics.gauge_fn("catalog_recommendation_history", lambda: len(history))
+
+    def recommend(sku, category):
+        if not svc.flag("recommendations_v2", False):
+            return None
+        kb = int(svc.flag("recommendations_cache_kb", 64))
+        related = db.query(
+            "SELECT sku FROM products WHERE active=1 AND category=? AND sku!=? ORDER BY sku "
+            "LIMIT 4",
+            (category, sku),
+        )
+        history.append((sku, bytearray(kb * 1024)))
+        return [r["sku"] for r in related]
+
     def price(p):
         discount = float(svc.flag("promo_discount_pct", 0) or 0)
         if discount and p["category"] in (svc.flag("promo_categories") or []):
@@ -69,6 +86,8 @@ def main():
             )
 
         rows = cached(f"products:{category or 'all'}:{page}", load)
+        if rows:
+            recommend(rows[0]["sku"], rows[0]["category"])
         return 200, {"page": page, "products": [price(p) for p in rows]}
 
     @svc.app.route("GET", "/products/{sku}")
@@ -79,7 +98,11 @@ def main():
             lambda: db.one(f"SELECT {cols} FROM products WHERE sku=? AND active=1", (sku,)),
         )
         require(p, 404, "product not found", sku=sku)
-        return 200, price(p)
+        out = price(p)
+        rec = recommend(sku, p["category"])
+        if rec is not None:
+            out["recommended"] = rec
+        return 200, out
 
     @svc.app.route("GET", "/search")
     def search(req):

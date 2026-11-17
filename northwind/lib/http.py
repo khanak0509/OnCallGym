@@ -184,7 +184,7 @@ def make_server(app: App, host: str, port: int, tls: dict | None = None) -> Serv
     if tls:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(tls["cert_file"], tls["key_file"])
-        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True, do_handshake_on_connect=False)
     return srv
 
 
@@ -333,8 +333,11 @@ class Upstream:
                 resp = self._attempt(method, path, data, hdrs)
             except UpstreamError as e:
                 self._observe(t0)
-                if e.kind != "pool_exhausted" and self.breaker:
-                    self.breaker.failure()
+                if self.breaker:
+                    if e.kind == "pool_exhausted":
+                        self.breaker.release_trial()  # no verdict on the upstream itself
+                    else:
+                        self.breaker.failure()
                 self._count(e.kind)
                 if attempt < len(delays) and e.kind in ("timeout", "connect"):
                     self._retry_log(attempt, e.kind)

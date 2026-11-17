@@ -242,6 +242,16 @@ def main():
         set_status(oid, "refunded", reason=req.json.get("reason", "refunded"))
         return 200, {"order_id": oid, "status": "refunded"}
 
+    @svc.app.route("POST", "/orders/{id}/abandon")
+    def abandon(req):
+        oid = req.params["id"]
+        o = db.one("SELECT status FROM orders WHERE id=?", (oid,))
+        require(o, 404, "order not found")
+        if o["status"] == "pending":
+            set_status(oid, "failed", reason="abandoned: checkout did not complete")
+            call(inventory, "POST", f"/reservations/{oid}/release")
+        return 200, {"order_id": oid}
+
     @svc.app.route("GET", "/orders")
     def list_orders(req):
         status = req.arg("status")

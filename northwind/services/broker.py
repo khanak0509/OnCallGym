@@ -8,6 +8,7 @@ etc/broker.yaml:
   bindings: [{queue: notify.events, topic: order.paid}]   # static bindings (optional)
 """
 
+import contextlib
 import json
 import secrets
 import threading
@@ -48,8 +49,26 @@ def main():
         db.execute("INSERT OR IGNORE INTO bindings VALUES (?, ?)", (b["queue"], b["topic"]))
     lock = threading.Lock()
 
+    @contextlib.contextmanager
+    def tx():
+        """Write transaction on the shared connection; rolled back on any error so a failed
+        write (e.g. disk full) never leaves the connection stuck inside a transaction."""
+        with lock:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+
     def qsetting(queue, key):
         return (qcfg.get(queue) or {}).get(key, defaults[key])
+
+    def max_deliveries(queue):
+        """None means unlimited (max_redeliveries < 0)."""
+        m = int(qsetting(queue, "max_redeliveries"))
+        return None if m < 0 else m + 1
 
     def dead_letter(queue, msg_id, err, now):
         db.execute(
@@ -69,8 +88,7 @@ def main():
         b = req.json
         require(b.get("topic"), 400, "missing topic")
         now = time.time()
-        with lock:
-            db.execute("BEGIN IMMEDIATE")
+        with tx():
             cur = db.execute(
                 "INSERT INTO messages (topic, payload, request_id, published_at) "
                 "VALUES (?, ?, ?, ?)",
@@ -88,7 +106,6 @@ def main():
                 )
             if not queues:
                 db.execute("INSERT INTO unrouted VALUES (?, ?)", (mid, b["topic"]))
-            db.execute("COMMIT")
         svc.metrics.inc("broker_published_total", topic=b["topic"])
         if not queues:
             svc.log.warn(
@@ -118,32 +135,27 @@ def main():
         require(queue, 400, "missing queue")
         n = max(1, min(int(b.get("max", 10)), 100))
         vis = float(b.get("visibility_timeout_s", 10))
-        max_deliveries = int(qsetting(queue, "max_redeliveries")) + 1
+        limit = max_deliveries(queue)
         ordered = bool(qsetting(queue, "ordered"))
         now = time.time()
         out = []
-        with lock:
-            db.execute("BEGIN IMMEDIATE")
+        select = (
+            "SELECT e.msg_id, e.deliveries, e.state, e.visible_at, m.topic, m.payload, "
+            "m.request_id FROM entries e JOIN messages m ON m.id=e.msg_id "
+            "WHERE e.queue=? AND e.state IN ('ready','inflight') "
+        )
+        with tx():
             if ordered:
-                busy = db.execute(
-                    "SELECT 1 FROM entries WHERE queue=? AND state='inflight' "
-                    "AND visible_at>? LIMIT 1",
-                    (queue, now),
-                ).fetchone()
-                n = 0 if busy else 1
-            rows = (
-                db.execute(
-                    "SELECT e.msg_id, e.deliveries, e.state, m.topic, m.payload, m.request_id "
-                    "FROM entries e JOIN messages m ON m.id=e.msg_id "
-                    "WHERE e.queue=? AND e.state IN ('ready','inflight') AND e.visible_at<=? "
-                    "ORDER BY e.msg_id LIMIT ?",
-                    (queue, now, n),
+                # strict FIFO: only the head of the queue may be delivered, and only when
+                # it is visible (not in flight, not waiting for its redelivery delay)
+                rows = db.execute(select + "ORDER BY e.msg_id LIMIT 1", (queue,)).fetchall()
+                rows = [r for r in rows if r["visible_at"] <= now]
+            else:
+                rows = db.execute(
+                    select + "AND e.visible_at<=? ORDER BY e.msg_id LIMIT ?", (queue, now, n)
                 ).fetchall()
-                if n
-                else []
-            )
             for r in rows:
-                if r["state"] == "inflight" and r["deliveries"] >= max_deliveries:
+                if r["state"] == "inflight" and limit is not None and r["deliveries"] >= limit:
                     dead_letter(queue, r["msg_id"], "visibility timeout expired", now)
                     continue
                 receipt = secrets.token_hex(6)
@@ -162,7 +174,6 @@ def main():
                         "receipt": receipt,
                     }
                 )
-            db.execute("COMMIT")
         return 200, {"messages": out}
 
     def settle(req, ack: bool):
@@ -185,10 +196,13 @@ def main():
                 )
                 return 200, {"acked": True}
             err = b.get("error", "")
-            if row["deliveries"] >= int(qsetting(queue, "max_redeliveries")) + 1:
+            limit = max_deliveries(queue)
+            if limit is not None and row["deliveries"] >= limit:
                 dead_letter(queue, mid, err, now)
                 return 200, {"dead_lettered": True}
-            delay = float(qsetting(queue, "redelivery_delay_ms")) / 1000 * row["deliveries"]
+            delay = (
+                float(qsetting(queue, "redelivery_delay_ms")) / 1000 * min(row["deliveries"], 10)
+            )
             db.execute(
                 "UPDATE entries SET state='ready', visible_at=?, last_error=?, "
                 "updated_at=? WHERE queue=? AND msg_id=?",
@@ -265,6 +279,30 @@ def main():
             )
         svc.log.info("dead-letter queue replayed", queue=req.params["queue"], count=cur.rowcount)
         return 200, {"replayed": cur.rowcount}
+
+    @svc.app.route("GET", "/queues/{queue}/messages")
+    def head(req):
+        """Messages waiting in a queue (ready or in flight), oldest first."""
+        with lock:
+            rows = db.execute(
+                "SELECT e.msg_id AS id, e.state, e.deliveries, e.last_error, m.topic, m.payload "
+                "FROM entries e JOIN messages m ON m.id=e.msg_id WHERE e.queue=? AND "
+                "e.state IN ('ready','inflight') ORDER BY e.msg_id LIMIT ?",
+                (req.params["queue"], max(1, min(int(req.arg("limit", 10)), 100))),
+            ).fetchall()
+        return 200, {"queue": req.params["queue"], "messages": [dict(r) for r in rows]}
+
+    @svc.app.route("POST", "/queues/{queue}/messages/{id}/dead-letter")
+    def move_to_dlq(req):
+        q, mid = req.params["queue"], int(req.params["id"])
+        with lock:
+            row = db.execute(
+                "SELECT state FROM entries WHERE queue=? AND msg_id=?", (q, mid)
+            ).fetchone()
+            require(row is not None, 404, "unknown message")
+            require(row["state"] in ("ready", "inflight"), 409, f"message is {row['state']}")
+            dead_letter(q, mid, (req.json.get("reason") or "moved by operator")[:200], time.time())
+        return 200, {"dead_lettered": mid}
 
     svc.ready_checks.append(lambda: (db.execute("SELECT 1").fetchone() is not None, "db"))
     svc.run()

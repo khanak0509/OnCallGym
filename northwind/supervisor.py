@@ -30,6 +30,7 @@ from northwind.lib.http import App, make_server, serve_in_thread
 from northwind.lib.log import Logger
 from northwind.lib.metrics import Registry
 
+ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "TMPDIR")
 PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 
 
@@ -103,7 +104,8 @@ class Supervisor:
 
     # process control
     def spawn(self, p: Proc):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("NW_")}
+        # services get a minimal environment: never the parent's tokens or credentials
+        env = {k: os.environ[k] for k in ENV_ALLOWLIST if k in os.environ}
         env.update(read_env_file(os.path.join(self.home, f"etc/env/{p.name}.env")))
         env["NW_HOME"] = self.home
         env["NW_SUPERVISOR_PID"] = str(os.getpid())
@@ -214,17 +216,30 @@ class Supervisor:
     def ready_loop(self):
         while not self.stopping.wait(1.0):
             for p in list(self.procs.values()):
-                if p.popen is not None and p.popen.poll() is None:
+                try:
+                    with self.lock:
+                        pop = p.popen
+                    if pop is None or pop.poll() is not None:
+                        continue
                     was = p.ready
                     self.check_ready(p)
-                    if p.ready:
-                        p.state = "running"
+                    with self.lock:
+                        if p.popen is not pop:
+                            continue  # restarted meanwhile; next round checks the new one
+                        if p.ready:
+                            p.state = "running"
                     if was and not p.ready:
                         self.log.warn(
                             "service became not ready",
                             service=p.name,
                             reasons=";".join(p.ready_reasons or [])[:160],
                         )
+                except Exception as e:
+                    self.log.error(
+                        "readiness check crashed",
+                        service=p.name,
+                        error=f"{type(e).__name__}: {e}"[:160],
+                    )
 
     def monitor_loop(self):
         while not self.stopping.wait(0.5):

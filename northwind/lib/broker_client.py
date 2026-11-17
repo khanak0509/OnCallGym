@@ -110,7 +110,17 @@ class Consumer:
         if error:
             body["error"] = error
         try:
-            self.up.post(path, body)
+            r = self.up.post(path, body)
+            if not r.ok:
+                # e.g. 409 stale receipt: visibility timeout expired while handling, so the
+                # message will be delivered again (handlers must be idempotent)
+                self.svc.log.warn(
+                    "ack/nack rejected",
+                    queue=self.queue,
+                    msg_id=m["id"],
+                    status=r.status,
+                    error=r.json().get("error"),
+                )
         except UpstreamError as e:
             self.svc.log.warn(
                 "ack/nack failed", queue=self.queue, msg_id=m["id"], error=str(e)[:120]

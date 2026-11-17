@@ -52,47 +52,49 @@ def main():
             svc.log.info("expired stale reservations", count=len(rows))
         return {"expired": len(rows)}
 
+    checked: set[str] = set()
+
     def reconcile_payments(job):
+        """Orders that failed (or were abandoned mid-checkout) may still have been charged at
+        the provider, e.g. when our call timed out. Ask payments to refund those."""
         grace = float(job.get("grace_s", 30))
-        pc = connect(svc.path(cfg["databases"]["payments"]))
+        now = time.time()
         oc = connect(svc.path(cfg["databases"]["orders"]))
         try:
-            charged = pc.execute(
-                "SELECT order_id FROM charges WHERE status='succeeded' AND updated_at<?",
-                (time.time() - grace,),
-            ).fetchall()
-            ids = [r[0] for r in charged]
-            bad = []
-            for i in range(0, len(ids), 200):
-                chunk = ids[i : i + 200]
-                q = ",".join("?" * len(chunk))
-                bad += [
-                    dict(r)
-                    for r in oc.execute(
-                        f"SELECT id, status FROM orders WHERE id IN ({q}) AND status IN "
-                        "('payment_failed','failed','rejected')",
-                        chunk,
-                    )
-                ]
+            rows = [
+                dict(r)
+                for r in oc.execute(
+                    "SELECT id, status FROM orders WHERE updated_at<? AND updated_at>? AND "
+                    "status IN ('payment_failed','failed','rejected','pending') "
+                    "ORDER BY updated_at LIMIT 200",
+                    (now - grace, now - 3600),
+                )
+                if r["id"] not in checked
+            ]
         finally:
-            pc.close()
             oc.close()
         refunded = 0
-        for o in bad:
+        for o in rows:
             try:
                 r = payments.post("/refunds", {"order_id": o["id"]})
-                if r.ok:
+                if not r.ok:
+                    continue
+                if r.json().get("refunded"):
                     orders.post(
                         f"/orders/{o['id']}/refunded",
-                        {"reason": "charged but checkout failed; refunded by reconcile"},
+                        {"reason": "charged but checkout did not complete; refunded by reconcile"},
                     )
                     refunded += 1
                     svc.log.warn(
                         "refunded charge for failed order", order=o["id"], order_status=o["status"]
                     )
+                elif o["status"] == "pending":
+                    orders.post(f"/orders/{o['id']}/abandon", {})
+                    svc.log.warn("abandoned stuck pending order", order=o["id"])
+                checked.add(o["id"])
             except UpstreamError as e:
-                svc.log.warn("reconcile refund failed", order=o["id"], error=str(e)[:120])
-        return {"checked": len(ids), "refunded": refunded}
+                svc.log.warn("reconcile failed", order=o["id"], error=str(e)[:120])
+        return {"checked": len(rows), "refunded": refunded}
 
     def rotate_logs(job):
         max_bytes = int(job.get("max_bytes", 2_000_000))
