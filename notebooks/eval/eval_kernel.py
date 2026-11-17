@@ -117,7 +117,10 @@ def main():
         "sandbox.log",
     )
     traj = WORK / "trajectories"
-    run_env = dict(os.environ, LOCAL_KEY="dummy", PATH=f"{vf}/bin:" + os.environ["PATH"])
+    # Kaggle sets UV_SYSTEM_PYTHON, which breaks verifiers' `uv` harness script preparation
+    run_env = {k: v for k, v in os.environ.items() if not k.startswith("UV_")}
+    run_env.update(LOCAL_KEY="dummy", PATH=f"{vf}/bin:" + os.environ["PATH"])
+    summary["removed_env"] = sorted(k for k in os.environ if k.startswith("UV_"))
     cmd = (
         f"{vf}/bin/vf-run oncallgym_env -m model --client.base-url http://127.0.0.1:8000/v1 "
         "--client.api-key-var LOCAL_KEY --env.agent.runtime.type subprocess "
