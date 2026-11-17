@@ -25,9 +25,10 @@ test:
 # includes integration tests that start real stacks
 test-all:
 ifeq ($(shell uname -s),Darwin)
-	$(MAKE) image >/dev/null && $(DOCKER_RUN) sh -c "uv sync -q && uv run pytest -q"
+	$(MAKE) image >/dev/null && $(DOCKER_RUN) sh -c "uv sync -q && \
+		uv pip install -q -e environments/oncallgym_env && uv run --no-sync pytest -q"
 else
-	uv run pytest -q
+	uv pip install -q -e environments/oncallgym_env && uv run --no-sync pytest -q
 endif
 
 image:
