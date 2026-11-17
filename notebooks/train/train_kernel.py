@@ -5,6 +5,7 @@ train_summary.json, sft/ (adapter + log), grpo/ (adapter, checkpoints, train_log
 """
 
 import base64
+import gzip
 import io
 import json
 import os
@@ -113,7 +114,7 @@ def main():
     with tarfile.open(fileobj=io.BytesIO(base64.b64decode(CODE_TGZ)), mode="r:gz") as t:
         t.extractall(SRC, filter="data")
     (SRC / "data").mkdir(exist_ok=True)
-    (SRC / "data/sft_train.jsonl").write_text(SFT_DATA)
+    (SRC / "data/sft_train.jsonl").write_bytes(gzip.decompress(base64.b64decode(SFT_DATA)))
     s = SETTINGS
     env = {k: v for k, v in os.environ.items() if not k.startswith("UV_")}
     sh(f"{sys.executable} -m pip install -q uv", "uv.log")

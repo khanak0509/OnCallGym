@@ -1,6 +1,7 @@
 """Usage: python build.py <kaggle-user> <out-dir> <sft-data.jsonl> '<settings json>'"""
 
 import base64
+import gzip
 import io
 import json
 import subprocess
@@ -30,7 +31,7 @@ src = (here / "train_kernel.py").read_text()
 for k, v in {
     "CODE_TGZ": base64.b64encode(buf.getvalue()).decode(),
     "COMMIT": commit,
-    "SFT_DATA": Path(data).read_text(),
+    "SFT_DATA": base64.b64encode(gzip.compress(Path(data).read_bytes())).decode(),
     "SETTINGS": settings,
 }.items():
     assert src.count(f"{k} = None") == 1, k
