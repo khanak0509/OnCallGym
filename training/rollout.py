@@ -26,13 +26,21 @@ def drain_episode_log() -> list[dict]:
 
 
 def make_rollout_func(
-    rows, rollouts_dir=None, max_turn_tokens=768, max_model_len=8192, run=run_episodes
+    rows,
+    rollouts_dir=None,
+    max_turn_tokens=768,
+    max_model_len=8192,
+    run=run_episodes,
+    dump_dir=None,
+    dump_calls=0,
 ):
+    """dump_dir/dump_calls: save the token ids and vLLM logprobs of the first calls (to compare
+    with the trainer's own logprobs when debugging sampler/trainer mismatch)."""
     by_prompt: dict[str, list[dict]] = {}
     for r in rows:
         by_prompt.setdefault(json.dumps(r["prompt"], sort_keys=True), []).append(r)
     rng = random.Random(0)
-    counter = [0]
+    counter = [0, 0]
 
     def rollout_func(prompts, trainer):
         # TRL's RepeatSampler already repeats each prompt num_generations times in a row, so
@@ -82,6 +90,17 @@ def make_rollout_func(
                 )
                 with open(path, "w") as f:
                     json.dump({"breakdown": b, "trajectory": r["trajectory"]}, f, default=str)
+        if dump_dir and counter[1] < dump_calls:
+            counter[1] += 1
+            os.makedirs(dump_dir, exist_ok=True)
+            with open(os.path.join(dump_dir, f"rollout-{counter[1]}.json"), "w") as f:
+                json.dump(
+                    [
+                        {k: r[k] for k in ("prompt_ids", "completion_ids", "logprobs", "env_mask")}
+                        for r in results
+                    ],
+                    f,
+                )
         return {
             "prompt_ids": [r["prompt_ids"] for r in results],
             "completion_ids": [r["completion_ids"] for r in results],

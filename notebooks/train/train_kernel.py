@@ -138,7 +138,12 @@ def main():
         "sandbox.log",
     )
     gpu0 = {**env, "CUDA_VISIBLE_DEVICES": "0", "PYTHONPATH": str(SRC)}
-    if s.get("sft", True):
+    sft_adapter = s.get("sft_adapter") or f"{WORK}/sft/adapter"
+    if s.get("sft_adapter") and not Path(sft_adapter, "adapter_config.json").exists():
+        found = sorted(Path("/kaggle/input").rglob("adapter_config.json"))
+        sft_adapter = str(found[0].parent) if found else sft_adapter
+    summary["sft_adapter"] = sft_adapter
+    if s.get("sft", True) and not s.get("sft_adapter"):
         rc, secs = sh(
             f"{py} training/sft.py --data data/sft_train.jsonl --out {WORK}/sft "
             f"--epochs {s.get('sft_epochs', 2)}",
@@ -151,7 +156,7 @@ def main():
             return
     gate = s.get("gate")
     if gate:
-        passed = run_gate(s, gate, py, env, {"sft": f"{WORK}/sft/adapter"})
+        passed = run_gate(s, gate, py, env, {"sft": sft_adapter})
         summary["stages"]["gate"] = passed
         save()
         if not passed.get("go"):
@@ -191,24 +196,27 @@ def main():
     save()
     if vllm.poll() is not None:
         return
-    adapter = f"--adapter {WORK}/sft/adapter" if s.get("sft", True) else ""
-    rc, secs = sh(
-        f"{py} training/grpo.py --out {WORK}/grpo --model {s['model']} {adapter} "
-        f"--steps {s['grpo_steps']} --variants {s.get('variants', 8)} "
-        f"--tiers {s.get('tiers', 'easy,medium,hard')}",
-        "grpo.log",
-        timeout=s.get("grpo_timeout_s", 30000),
-        env=gpu0,
-    )
-    summary["stages"]["grpo"] = {"rc": rc, "s": secs}
+    adapter = f"--adapter {sft_adapter}" if s.get("sft", True) else ""
+    runs = s.get("grpo_runs") or [{"name": "grpo", "args": ""}]
+    for run in runs:
+        rc, secs = sh(
+            f"{py} training/grpo.py --out {WORK}/{run['name']} --model {s['model']} {adapter} "
+            f"--steps {s['grpo_steps']} --variants {s.get('variants', 8)} "
+            f"--tiers {s.get('tiers', 'easy,medium,hard')} {run['args']}",
+            f"{run['name']}.log",
+            timeout=s.get("grpo_timeout_s", 30000),
+            env=gpu0,
+        )
+        summary["stages"][run["name"]] = {"rc": rc, "s": secs, "args": run["args"]}
+        save()
     vllm.terminate()
     vllm.wait(timeout=120)
     save()
     post = s.get("post_eval")
     if post and rc == 0:
-        adapters = {"grpo": f"{WORK}/grpo/adapter"}
+        adapters = {"grpo": f"{WORK}/{runs[-1]['name']}/adapter"}
         if s.get("sft", True):
-            adapters = {"sft": f"{WORK}/sft/adapter", **adapters}
+            adapters = {"sft": sft_adapter, **adapters}
         summary["stages"]["post_eval"] = run_gate(s, post, py, env, adapters, prefix="post")
 
 

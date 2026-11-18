@@ -47,7 +47,7 @@ meta = {
     "enable_gpu": True,
     "enable_internet": True,
     "machine_shape": "NvidiaTeslaT4",
-    "dataset_sources": [],
+    "dataset_sources": settings.get("datasets", []),
     "competition_sources": [],
     "kernel_sources": [],
     "model_sources": [],

@@ -38,6 +38,13 @@ def main():
     ap.add_argument("--vllm-port", type=int, default=8000)
     ap.add_argument("--save-every", type=int, default=10)
     ap.add_argument("--resume", default=None)
+    ap.add_argument("--temperature", type=float, default=1.0)
+    ap.add_argument(
+        "--is-mode", default=None, help="vllm_importance_sampling_mode (TRL default if unset)"
+    )
+    ap.add_argument(
+        "--debug-dump", type=int, default=0, help="dump tokens+logprobs of first N calls"
+    )
     a = ap.parse_args()
 
     import torch
@@ -115,6 +122,9 @@ def main():
         report_to=[],
         save_strategy="no",
         seed=0,
+        temperature=a.temperature,
+        cast_lm_head_to_fp32=a.lm_head_fp32,
+        **({"vllm_importance_sampling_mode": a.is_mode} if a.is_mode else {}),
     )
     trainer = GRPOTrainer(
         model=model,
@@ -122,16 +132,40 @@ def main():
         train_dataset=ds,
         processing_class=tok,
         reward_funcs=[oncall_reward],
-        rollout_func=make_rollout_func(rows, os.path.join(a.out, "rollouts")),
+        rollout_func=make_rollout_func(
+            rows,
+            os.path.join(a.out, "rollouts"),
+            dump_dir=os.path.join(a.out, "debug") if a.debug_dump else None,
+            dump_calls=a.debug_dump,
+        ),
         peft_config=peft_config,
         callbacks=[Logger()],
     )
     # record the real input length of every policy forward pass (owner requirement)
     orig = trainer._get_per_token_logps_and_entropies
 
+    dumped = [0]
+
     def logged(model, input_ids, *args, **kwargs):
         forward_lengths.append(int(input_ids.shape[-1]))
-        return orig(model, input_ids, *args, **kwargs)
+        out = orig(model, input_ids, *args, **kwargs)
+        if dumped[0] < a.debug_dump * 2:
+            dumped[0] += 1
+            d = os.path.join(a.out, "debug")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, f"forward-{dumped[0]}.json"), "w") as f:
+                json.dump(
+                    {
+                        "input_ids": input_ids.tolist(),
+                        "logps": out[0].float().tolist(),
+                        "training": model.training,
+                        "grad": torch.is_grad_enabled(),
+                        "args": [str(x)[:80] for x in args],
+                        "kwargs": {k: str(v)[:80] for k, v in kwargs.items()},
+                    },
+                    f,
+                )
+        return out
 
     trainer._get_per_token_logps_and_entropies = logged
     trainer.train(resume_from_checkpoint=a.resume)
