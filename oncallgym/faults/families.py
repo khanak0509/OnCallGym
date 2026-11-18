@@ -822,7 +822,7 @@ class PaymentsBreakerStuckOpen(Fault):
 
     def choose_params(self, rng):
         return {
-            "error_rate": rng.choice([0.12, 0.15, 0.2]),
+            "error_rate": rng.choice([0.08, 0.1, 0.12]),
             "reset_timeout_s": rng.choice([300, 600, 900]),
         }
 
