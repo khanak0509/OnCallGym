@@ -54,10 +54,11 @@ def wait_up(port, proc, tries=240):
     return False
 
 
-def run_gate(s, gate, py, env):
-    """pass@k of base and SFT models on easy train tasks with the shared-loop evaluator.
-    GRPO only starts if the SFT model's per-sample solve rate is within the band."""
-    log = open(WORK / "vllm_gate.log", "w")
+def run_gate(s, gate, py, env, adapters, prefix="gate"):
+    """pass@k of LoRA adapters (and optionally the base model) with the shared-loop
+    evaluator. As the gate, GRPO only starts if the SFT solve rate is within the band;
+    after GRPO the same settings give the before/after comparison."""
+    log = open(WORK / f"vllm_{prefix}.log", "w")
     cmd = [
         f"{VENV}/bin/vllm",
         "serve",
@@ -74,7 +75,7 @@ def run_gate(s, gate, py, env):
         "--max-lora-rank",
         "16",
         "--lora-modules",
-        f"sft={WORK}/sft/adapter",
+        *[f"{k}={v}" for k, v in adapters.items()],
     ]
     proc = subprocess.Popen(
         cmd,
@@ -86,22 +87,24 @@ def run_gate(s, gate, py, env):
     out = {"up": wait_up(8100, proc)}
     if not out["up"]:
         return out
-    for name in ("sft", s["model"]) if gate.get("base", True) else ("sft",):
-        tag = "sft" if name == "sft" else "base"
+    names = list(adapters) + ([s["model"]] if gate.get("base", True) else [])
+    for name in names:
+        tag = name if name in adapters else "base"
         rc, secs = sh(
             f"{py} -m oncallgym.evaluate --base-url http://127.0.0.1:8100 "
             f"--backend vllm --model {name} --tokenizer {s['model']} "
             f"--split {gate.get('split', 'train')} --tiers {gate.get('tiers', 'easy')} "
             f"--variants {gate.get('variants', '0-3')} --samples {gate.get('samples', 8)} "
-            f"--parallel 8 --out {WORK}/gate_{tag}",
-            f"gate_{tag}.log",
+            f"--parallel 8 --out {WORK}/{prefix}_{tag}",
+            f"{prefix}_{tag}.log",
             env={**env, "PYTHONPATH": str(SRC)},
         )
         try:
-            out[tag] = json.loads((WORK / f"gate_{tag}" / "meta.json").read_text())
+            out[tag] = json.loads((WORK / f"{prefix}_{tag}" / "meta.json").read_text())
         except OSError:
             out[tag] = {"rc": rc}
     proc.terminate()
+    proc.wait(timeout=120)
     rate = out.get("sft", {}).get("solve_rate", 0.0)
     lo, hi = gate.get("band", [0.10, 0.40])
     out["go"] = bool(lo <= rate <= hi) or bool(gate.get("force"))
@@ -148,7 +151,7 @@ def main():
             return
     gate = s.get("gate")
     if gate:
-        passed = run_gate(s, gate, py, env)
+        passed = run_gate(s, gate, py, env, {"sft": f"{WORK}/sft/adapter"})
         summary["stages"]["gate"] = passed
         save()
         if not passed.get("go"):
@@ -199,6 +202,14 @@ def main():
     )
     summary["stages"]["grpo"] = {"rc": rc, "s": secs}
     vllm.terminate()
+    vllm.wait(timeout=120)
+    save()
+    post = s.get("post_eval")
+    if post and rc == 0:
+        adapters = {"grpo": f"{WORK}/grpo/adapter"}
+        if s.get("sft", True):
+            adapters = {"sft": f"{WORK}/sft/adapter", **adapters}
+        summary["stages"]["post_eval"] = run_gate(s, post, py, env, adapters, prefix="post")
 
 
 try:
