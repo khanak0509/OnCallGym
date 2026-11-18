@@ -226,6 +226,8 @@ class Probe:
                     )
                     ok = st == 201
                 ms = (time.monotonic() - t0) * 1000
+                if not ok and "first_failure" not in checkouts:
+                    checkouts["first_failure"] = f"{st} {str(d)[:160]}"
                 checkouts["ok" if ok else "failed"] += 1
                 checkouts["max_ms"] = round(max(checkouts["max_ms"], ms), 1)
             tick += 1

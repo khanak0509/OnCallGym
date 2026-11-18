@@ -853,6 +853,32 @@ class PaymentsBreakerStuckOpen(Fault):
 
         edit_service_config(stack, "payments", payments)
 
+    def inject(self, stack):
+        """A short error blip trips the breaker: run customer checkouts until one fails fast
+        with breaker_open (with threshold 1 the first provider error does it). Without this
+        the fault only shows if background traffic happens to hit an error in time."""
+        from ..probes import Probe
+
+        p = Probe(stack)
+        for _ in range(80):
+            user = p.rng.choice(p.secret["probe_users"])
+            st, d, _ = p._req(
+                "POST", "/api/auth/login", {"email": user["email"], "password": user["password"]}
+            )
+            if st != 200:
+                time.sleep(0.5)
+                continue
+            st, d, _ = p._req(
+                "POST",
+                "/api/checkout",
+                {"items": [{"sku": p.rng.choice(p.secret["skus"]), "qty": 1}]},
+                token=d["token"],
+                timeout=15,
+            )
+            if "breaker_open" in json.dumps(d):
+                return
+        raise RuntimeError("payments breaker did not open")
+
     def root_cause_fixed(self, stack):
         b = effective_config(stack, "payments")["upstreams"]["provider"].get("breaker")
         if not b:
