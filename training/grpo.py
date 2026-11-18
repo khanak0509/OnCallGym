@@ -64,6 +64,7 @@ def main():
 
     log_path = os.path.join(a.out, "train_log.jsonl")
     forward_lengths: list[int] = []
+    grad_norms: list[float] = []
 
     class Logger(TrainerCallback):
         def on_step_begin(self, args, state, control, **kw):
@@ -87,6 +88,12 @@ def main():
             rec["nonfinite"] = nonfinite
             with open(log_path, "a") as f:
                 f.write(json.dumps(rec, default=str) + "\n")
+            if "grad_norm" in rec:
+                grad_norms.append(rec["grad_norm"])
+            # every sequence masked by importance sampling gives exactly zero gradient
+            if len(grad_norms) >= 3 and not any(grad_norms):
+                print("grad_norm is 0 on the first 3 steps, stopping", flush=True)
+                control.should_training_stop = True
 
         def on_step_end(self, args, state, control, **kw):
             if state.global_step % a.save_every == 0:
