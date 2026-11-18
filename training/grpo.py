@@ -39,6 +39,7 @@ def main():
     ap.add_argument("--save-every", type=int, default=10)
     ap.add_argument("--resume", default=None)
     ap.add_argument("--temperature", type=float, default=1.0)
+    ap.add_argument("--lm-head-fp32", action="store_true", help="cast_lm_head_to_fp32")
     ap.add_argument(
         "--is-mode", default=None, help="vllm_importance_sampling_mode (TRL default if unset)"
     )
