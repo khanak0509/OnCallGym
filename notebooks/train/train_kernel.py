@@ -54,6 +54,17 @@ def wait_up(port, proc, tries=240):
     return False
 
 
+def find_adapter(path):
+    """A LoRA adapter dir; for a dataset mount, search under it by the dataset's slug."""
+    if Path(path, "adapter_config.json").exists():
+        return path
+    slug = Path(path).name
+    found = sorted(
+        f.parent for f in Path("/kaggle/input").rglob("adapter_config.json") if slug in str(f)
+    )
+    return str(found[0]) if found else path
+
+
 def run_gate(s, gate, py, env, adapters, prefix="gate"):
     """pass@k of LoRA adapters (and optionally the base model) with the shared-loop
     evaluator. As the gate, GRPO only starts if the SFT solve rate is within the band;
@@ -139,10 +150,16 @@ def main():
     )
     gpu0 = {**env, "CUDA_VISIBLE_DEVICES": "0", "PYTHONPATH": str(SRC)}
     sft_adapter = s.get("sft_adapter") or f"{WORK}/sft/adapter"
-    if s.get("sft_adapter") and not Path(sft_adapter, "adapter_config.json").exists():
-        found = sorted(Path("/kaggle/input").rglob("adapter_config.json"))
-        sft_adapter = str(found[0].parent) if found else sft_adapter
+    if s.get("sft_adapter"):
+        sft_adapter = find_adapter(sft_adapter)
     summary["sft_adapter"] = sft_adapter
+    ev = s.get("eval")
+    if ev:
+        adapters = {k: find_adapter(v) for k, v in ev.get("adapters", {}).items()}
+        summary["eval_adapters"] = adapters
+        summary["stages"]["eval"] = run_gate(s, ev, py, env, adapters, prefix="eval")
+        save()
+        return
     if s.get("sft", True) and not s.get("sft_adapter"):
         rc, secs = sh(
             f"{py} training/sft.py --data data/sft_train.jsonl --out {WORK}/sft "
