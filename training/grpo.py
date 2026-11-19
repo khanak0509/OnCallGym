@@ -43,6 +43,7 @@ def main():
     ap.add_argument(
         "--is-mode", default=None, help="vllm_importance_sampling_mode (TRL default if unset)"
     )
+    ap.add_argument("--max-logp-gap", type=float, default=0.4)
     ap.add_argument(
         "--debug-dump", type=int, default=0, help="dump tokens+logprobs of first N calls"
     )
@@ -65,6 +66,7 @@ def main():
     log_path = os.path.join(a.out, "train_log.jsonl")
     forward_lengths: list[int] = []
     grad_norms: list[float] = []
+    gaps: list[float] = []
 
     class Logger(TrainerCallback):
         def on_step_begin(self, args, state, control, **kw):
@@ -93,6 +95,13 @@ def main():
             # every sequence masked by importance sampling gives exactly zero gradient
             if len(grad_norms) >= 3 and not any(grad_norms):
                 print("grad_norm is 0 on the first 3 steps, stopping", flush=True)
+                control.should_training_stop = True
+            # vLLM must sample from the trainer's weights: same weights give ~0.15 nats/token
+            gap = rec.get("sampling/sampling_logp_difference/mean")
+            if gap is not None:
+                gaps.append(gap)
+            if len(gaps) >= 2 and min(gaps[-2:]) > a.max_logp_gap:
+                print(f"trainer/vLLM logprob gap {gaps[-2:]} too high, stopping", flush=True)
                 control.should_training_stop = True
 
         def on_step_end(self, args, state, control, **kw):
@@ -149,6 +158,11 @@ def main():
         peft_config=peft_config,
         callbacks=[Logger()],
     )
+    if a.adapter or peft_config is not None:
+        from training.vllm_sync import make_safe_peft_iter
+
+        # TRL's merge/push/unmerge races vLLM's side-stream copies (see training/vllm_sync.py)
+        trainer.vllm_generation._iter_named_params = make_safe_peft_iter(trainer.vllm_generation)
     # record the real input length of every policy forward pass (owner requirement)
     orig = trainer._get_per_token_logps_and_entropies
 

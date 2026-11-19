@@ -215,7 +215,7 @@ def main():
     post = s.get("post_eval")
     if post and rc == 0:
         adapters = {"grpo": f"{WORK}/{runs[-1]['name']}/adapter"}
-        if s.get("sft", True):
+        if s.get("sft", True) and post.get("sft", True):
             adapters = {"sft": sft_adapter, **adapters}
         summary["stages"]["post_eval"] = run_gate(s, post, py, env, adapters, prefix="post")
 
