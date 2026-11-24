@@ -81,7 +81,10 @@ Baselines (open models, no training, same settings): TBD (Qwen3-0.6B / 1.7B / 4B
 
 ### Where episodes fail
 
-One outcome per episode (`analysis/taxonomy.py`):
+One outcome per episode (`analysis/taxonomy.py`; figure from `analysis/plots.py`):
+
+![outcomes](results/plots/outcomes.png)
+
 
 | run | solved | gate tripped | no submission | fixed, not held | right diagnosis, no fix | wrong service | wrong category |
 |---|---|---|---|---|---|---|---|
@@ -127,6 +130,8 @@ Two things had to be fixed before GRPO learned anything, both found by dumping t
 
 1. TRL's default `sequence_mask` importance-sampling correction multiplies per-token ratios over a whole ~500-token multi-turn episode. A per-token trainer/vLLM gap of 0.15-0.6 nats underflowed every ratio to 0, so the gradient was exactly zero for 40 steps. Per-token truncation (`--is-mode token_truncate`) keeps the gradient alive. The gap itself turned out to come from bug 2, not from fp16 numerics.
 2. TRL's LoRA weight sync merges the adapter, hands vLLM views of the live weights, then unmerges. vLLM copies them on two side CUDA streams with no ordering against the merge/unmerge, so some layers arrived as base weights and vLLM sampled from a half-merged model (logprob gap 0.8-1.0 nats/token; after the fix 0.003-0.02). `training/vllm_sync.py` synchronizes around the merge and yields copies; `tests/test_vllm_sync.py`.
+
+![logprob gap](results/plots/sync_fix_logprob_gap.png)
 
 ## Running it
 
