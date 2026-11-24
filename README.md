@@ -337,16 +337,12 @@ Training runs on Kaggle (2× T4). `notebooks/train/build.py` packs the code, dat
 
 ---
 
-## 🤔 Honest limitations
+## ⚠️ Limitations
 
 - **One model size** (1.7B), and short GRPO runs (40-60 steps), because everything ran on a free weekly quota of 30 GPU-hours.
 - **No transfer** to unseen fault families. Whatever the models learned stays on the families they trained on.
 - **The system is synthetic and small.** The services are small Python processes, not production software; the realism comes from the failure modes, alerts and checks, not from scale.
 - **The verifier is a bit lenient on tidiness.** It checks that the faulty value was corrected, not that the rest of the file is clean, so a fix that also leaves a junk key behind still counts.
-
-## 🔭 What I'd try next
-
-The clearest lever is the fix itself: a large share of episodes get the diagnosis right and then fumble the `sed`. A proper file-editing tool would likely raise solve rates enough to give GRPO real successes to learn from. After that: longer RL runs, a curriculum from easy to hard faults, and bigger models.
 
 ---
 
