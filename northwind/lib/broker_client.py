@@ -1,5 +1,3 @@
-"""Client for the Northwind broker: publish, and a polling consumer with ack/nack."""
-
 import time
 
 from .http import Upstream, UpstreamError, current_request_id
@@ -20,9 +18,6 @@ class Publisher:
 
 
 class Consumer:
-    """Pulls batches from `queue` (bound to `topics`) and calls handler(msg) for each.
-    handler returning normally -> ack; raising -> nack (broker redelivers or dead-letters)."""
-
     def __init__(
         self,
         svc,
@@ -111,8 +106,6 @@ class Consumer:
         try:
             r = self.up.post(path, body)
             if not r.ok:
-                # e.g. 409 stale receipt: visibility timeout expired while handling, so the
-                # message will be delivered again (handlers must be idempotent)
                 self.svc.log.warn(
                     "ack/nack rejected",
                     queue=self.queue,

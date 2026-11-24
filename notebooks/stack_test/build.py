@@ -1,8 +1,3 @@
-"""Bundle stack_test.py + grpo_probe.py into one Kaggle script kernel folder.
-
-Usage: python build.py <kaggle-username> <output-dir> [plan]
-"""
-
 import json
 import sys
 from pathlib import Path

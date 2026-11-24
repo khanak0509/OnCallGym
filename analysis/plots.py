@@ -1,8 +1,3 @@
-"""Figures for the README and paper, generated only from results/*/summary.json.
-
-python analysis/plots.py          # writes results/plots/*.png
-"""
-
 import json
 from pathlib import Path
 
@@ -19,7 +14,7 @@ SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 GRID = "#e6e5e0"
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]  # validated, fixed order
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 
 plt.rcParams.update(
     {
@@ -65,7 +60,6 @@ def sync_fix():
     plt.close(fig)
 
 
-# taxonomy outcomes folded into five groups for the figure (full split in the README table)
 GROUPS = [
     ("solved", ["solved"]),
     ("fixed, not solved", ["fix_not_held", "fixed_wrong_diag"]),
@@ -75,15 +69,17 @@ GROUPS = [
 ]
 RUNS = [
     ("easy train · SFT", "train-easy_sft"),
-    ("easy train · SFT+GRPO", "train-easy_grpo-easy40"),
+    ("easy train · SFT+GRPO easy", "train-easy_grpo-easy40"),
+    ("all train · SFT", "train-all_sft-v11"),
+    ("all train · SFT+GRPO all tiers", "train-all_grpo-v11"),
     ("held-out · base", "test_base-1.7b"),
     ("held-out · SFT", "test_sft"),
-    ("held-out · SFT+GRPO", "test_grpo-easy40"),
+    ("held-out · SFT+GRPO easy", "test_grpo-easy40"),
 ]
 
 
 def outcomes():
-    fig, ax = plt.subplots(figsize=(8, 3.6))
+    fig, ax = plt.subplots(figsize=(8, 4.4))
     labels = [r[0] for r in RUNS][::-1]
     data = [load(r[1])["aggregate"]["outcomes"] for r in RUNS][::-1]
     left = [0.0] * len(data)

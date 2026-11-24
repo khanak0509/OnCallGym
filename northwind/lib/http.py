@@ -1,10 +1,3 @@
-"""Minimal JSON HTTP server and resilient HTTP client (stdlib only).
-
-Every request carries X-Request-Id. The server stores it in a context variable so that
-outgoing calls made while handling the request propagate the same id. Each handled
-request writes one access log line (type=access) that telemetry uses to build traces.
-"""
-
 import contextvars
 import hmac
 import http.client
@@ -69,14 +62,12 @@ class App:
         self.log = log
         self.metrics = metrics
         self.routes: list[tuple[str, re.Pattern, callable, str]] = []
-        self.internal: set[tuple[str, str]] = set()  # (method, pattern) needing the token
+        self.internal: set[tuple[str, str]] = set()
         self.internal_token: str | None = None
-        self.fallback = None  # fn(req) -> (route_label, result), used by the edge proxy
+        self.fallback = None
         self.quiet_paths = set(QUIET_PATHS)
 
     def route(self, method: str, pattern: str, internal: bool = False):
-        """Register a handler; pattern uses {name} placeholders, e.g. /orders/{id}.
-        internal=True: service-to-service only (requires X-Internal-Token)."""
         regex = re.compile("^" + re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern) + "$")
 
         def deco(fn):
@@ -116,7 +107,7 @@ class App:
 def _make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        disable_nagle_algorithm = True  # headers and body are separate writes
+        disable_nagle_algorithm = True
         server_version = f"northwind-{app.svc}"
 
         def log_message(self, *args):
@@ -234,12 +225,6 @@ class Response:
 
 
 class Upstream:
-    """Client for one dependency: keep-alive pool, per-attempt timeout, retries with
-    exponential backoff, optional circuit breaker. Config keys (all optional except url):
-      url, timeout_ms, retries, backoff_ms, backoff_max_ms, pool_size, pool_timeout_ms,
-      retry_on_status (list), breaker: {failure_threshold, window_s, reset_timeout_s}, ca_file
-    """
-
     def __init__(
         self, caller: str, name: str, cfg: dict, metrics=None, log=None, token: str | None = None
     ):
@@ -305,7 +290,6 @@ class Upstream:
                 r = conn.getresponse()
                 body = r.read()
             except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError):
-                # stale keep-alive connection: retry once on a fresh one
                 conn.close()
                 conn = self._new_conn()
                 conn.request(method, self.base_path + path, body=data, headers=headers)
@@ -354,7 +338,7 @@ class Upstream:
                 self._observe(t0)
                 if self.breaker:
                     if e.kind == "pool_exhausted":
-                        self.breaker.release_trial()  # no verdict on the upstream itself
+                        self.breaker.release_trial()
                     else:
                         self.breaker.failure()
                 self._count(e.kind)

@@ -1,11 +1,3 @@
-"""Small KV cache with a memory budget and an eviction policy.
-
-etc/cache.yaml:
-  max_memory_bytes: 4000000
-  eviction_policy: allkeys-lru   # or noeviction (writes fail with 507 when full)
-  default_ttl_s: 60
-"""
-
 import threading
 import time
 from collections import OrderedDict

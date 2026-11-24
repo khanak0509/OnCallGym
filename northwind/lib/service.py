@@ -1,10 +1,3 @@
-"""Common service runtime: config loading, logger, metrics, health/ready/metrics/version
-endpoints, flags polling, graceful shutdown.
-
-A service module builds its routes on a Service and calls svc.run().
-Config lives in <home>/etc/<name>.yaml; paths in it are relative to <home>.
-"""
-
 import argparse
 import json
 import os
@@ -26,14 +19,10 @@ def rss_bytes() -> int:
         with open("/proc/self/statm") as f:
             return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
     except OSError:
-        # macOS reports ru_maxrss in bytes (peak, not current); good enough off Linux
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
 def resolve_config_file(home: str, name: str, override: str | None) -> str:
-    """The config file a service actually loads. Only etc/<name>.yaml or a file directly
-    in etc/archive/ is allowed; anything else stops the service (the verifier uses the same
-    function, so it always checks the config that is really in effect)."""
     default = os.path.realpath(os.path.join(home, "etc", f"{name}.yaml"))
     if not override:
         return default
@@ -47,7 +36,6 @@ def resolve_config_file(home: str, name: str, override: str | None) -> str:
 
 
 def read_token(home: str) -> str | None:
-    """Service-to-service token; the file is readable only by the stack owner."""
     try:
         with open(os.path.join(home, "run", "internal.token")) as f:
             return f.read().strip() or None
@@ -56,9 +44,6 @@ def read_token(home: str) -> str | None:
 
 
 class FlagsClient:
-    """Polls the flags service; on failure keeps the last good values, and before the first
-    successful fetch uses the service's local defaults (as real services do)."""
-
     def __init__(self, svc: "Service", url: str | None, interval_s: float, defaults: dict):
         self.svc = svc
         self.url = url
@@ -141,15 +126,12 @@ class Service:
         return rel if os.path.isabs(rel) else os.path.join(self.home, rel)
 
     def load_config(self) -> dict:
-        """etc/<name>.yaml, unless NW_CONFIG_FILE names an archived release config in
-        etc/archive/ (deploy tooling uses it for rollbacks). See resolve_config_file."""
         path = resolve_config_file(self.home, self.name, os.environ.get("NW_CONFIG_FILE"))
         self.config_file = os.path.relpath(path, self.home)
         with open(path) as f:
             return yaml.safe_load(f) or {}
 
     def upstream(self, name: str, internal: bool = True) -> Upstream:
-        """internal=False for clients that relay outside traffic (the edge proxy)."""
         cfg = dict(self.config["upstreams"][name])
         if cfg.get("ca_file"):
             cfg["ca_file"] = self.path(cfg["ca_file"])
@@ -157,8 +139,6 @@ class Service:
         return Upstream(self.name, name, cfg, self.metrics, self.log, token=token)
 
     def database(self, name: str, key: str = "db") -> Pool:
-        """Pool for config section `key` ({path, pool_size, acquire_timeout_ms}) and a
-        readiness check that the required schema version is present."""
         from northwind.schema import REQUIRED, schema_version
 
         c = self.config.get(key, {})

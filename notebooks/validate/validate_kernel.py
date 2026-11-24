@@ -1,6 +1,3 @@
-"""Kaggle CPU kernel: run the spec 7.4 validation (all checks, all cheats) for every fault
-family. Built by build.py (CODE_TGZ, COMMIT, ARGS filled in). No GPU."""
-
 import base64
 import io
 import json

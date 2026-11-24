@@ -1,10 +1,3 @@
-"""Periodic jobs: expire stale reservations, reconcile payments against orders, rotate logs.
-
-Jobs and intervals come from etc/scheduler.yaml. Like many real cron runners, jobs touch
-the databases directly (inventory.db, payments.db, orders.db) and call APIs where a side
-effect must go through a service (refunds).
-"""
-
 import glob
 import os
 import threading
@@ -55,8 +48,6 @@ def main():
     checked: set[str] = set()
 
     def reconcile_payments(job):
-        """Orders that failed (or were abandoned mid-checkout) may still have been charged at
-        the provider, e.g. when our call timed out. Ask payments to refund those."""
         grace = float(job.get("grace_s", 30))
         now = time.time()
         oc = connect(svc.path(cfg["databases"]["orders"]))

@@ -1,6 +1,3 @@
-"""The safe LoRA sync yields the same names as TRL's iterator, merged values that the unmerge
-can't touch, and leaves the model unmerged. Needs torch, peft and trl (the training venv)."""
-
 import contextlib
 
 import pytest
@@ -48,8 +45,7 @@ def test_matches_trl_names_and_merged_values():
     for (_, a), (_, b) in zip(got, ref, strict=True):
         assert torch.equal(a, b)
     merged = dict(got)["q_proj.weight"]
-    assert not torch.allclose(merged, base)  # the LoRA delta is in what vLLM gets
-    # model is back to unmerged, and the yielded tensor was not changed by the unmerge
+    assert not torch.allclose(merged, base)
     assert not model.base_model.model.q_proj.merged
     assert torch.allclose(model.base_model.model.q_proj.base_layer.weight, base, atol=1e-6)
     assert not torch.allclose(merged, base)
@@ -91,5 +87,5 @@ def test_trl_sync_weights_uses_the_patched_iterator():
     vg._iter_named_params = spy
     vg.sync_weights()
     assert calls and sent.get("_reset")
-    assert not torch.allclose(sent["q_proj.weight"], base)  # merged weights went out
+    assert not torch.allclose(sent["q_proj.weight"], base)
     assert not model.base_model.model.q_proj.merged

@@ -1,11 +1,3 @@
-"""Edge reverse proxy: routing by path prefix, per-client rate limiting, request ids,
-per-route timeouts, TLS to auth.
-
-etc/edge.yaml:
-  routes: [{prefix: /api/auth/login, upstream: auth, rewrite: /login}]
-  rate_limit: {rps: 40, burst: 80}   # per client (X-Client-Id header, else peer address)
-"""
-
 import threading
 from urllib.parse import urlencode
 
@@ -19,7 +11,6 @@ FORWARD_HEADERS = ("Authorization", "Idempotency-Key", "Content-Type")
 def main():
     svc = Service("edge")
     cfg = svc.config
-    # client traffic is relayed without the internal token
     ups = {name: svc.upstream(name, internal=False) for name in cfg["upstreams"]}
     routes = sorted(cfg["routes"], key=lambda r: -len(r["prefix"]))
     rl = cfg.get("rate_limit", {})

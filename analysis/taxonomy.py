@@ -1,18 +1,3 @@
-"""Failure taxonomy over evaluator output dirs (oncallgym.evaluate --out ...).
-
-    python analysis/taxonomy.py name=path [name=path ...] [--md out.md] [--json out.json]
-
-Every episode gets exactly one outcome, checked in this order:
-  solved             verifier says solved
-  guardrail          G == 0 (damaged data/config/jobs, forbidden action)
-  no_submission      ended without submit_diagnosis (turn limit, context exhausted, ...)
-  fix_not_held       root cause fixed but recovery or persistence failed
-  fixed_wrong_diag   root cause fixed and system recovered, but diagnosis wrong
-  diag_no_fix        diagnosis right (category + component), root cause not fixed
-  wrong_component    diagnosis names the wrong service, nothing fixed
-  wrong_category     right service, wrong category, nothing fixed
-"""
-
 import json
 import sys
 from collections import Counter, defaultdict

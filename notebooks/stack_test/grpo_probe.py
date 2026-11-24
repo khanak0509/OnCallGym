@@ -1,14 +1,3 @@
-"""Measure GRPO step time/memory and fp16 stability on one GPU.
-
-Two modes, each run in its own process by stack_test.py:
-
-  grpo    real TRL GRPO steps with multi-turn tool calls through a vLLM server
-  memory  worst-case forward+backward of one full-length sequence with LoRA
-
-The tool environment is synthetic (fake logs/metrics of a few services). Its only job
-is to produce realistic multi-turn contexts; it is not the OnCallGym environment.
-"""
-
 import argparse
 import json
 import math
@@ -47,12 +36,8 @@ def fake_logs(service: str, seed: int, lines: int = 16) -> str:
     return "\n".join(out)
 
 
-# Filled by run_grpo: tokenizer for counting tool-output tokens, and one record per finished
-# rollout. TRL's completion-length metrics exclude tool tokens, so we count them ourselves.
 TOKENIZER = None
 ROLLOUTS: list[dict] = []
-# If > 0, logs() and metrics() outputs are padded to about this many tokens, so a handful of
-# calls fills the context window (used to test the trainer at a given context cap).
 TOOL_TOKENS = 0
 
 
@@ -68,8 +53,6 @@ def pad_to(text: str, target: int, make_line) -> str:
 
 
 class ProbeEnv:
-    """Synthetic on-call environment exposing tools to TRL's environment_factory."""
-
     def __init__(self):
         self.seed = 0
         self.submitted = None
@@ -90,22 +73,9 @@ class ProbeEnv:
         return text
 
     def list_services(self) -> str:
-        """List all services with their status.
-
-        Returns:
-            One line per service with status and restart count.
-        """
         return self._count("\n".join(f"{s} status=running restarts=0 ready=true" for s in SERVICES))
 
     def logs(self, service: str) -> str:
-        """Show the most recent log lines of a service.
-
-        Args:
-            service: Name of the service, for example "orders".
-
-        Returns:
-            The last log lines of the service.
-        """
         if service not in SERVICES:
             return f"error: unknown service {service!r}"
         rng = random.Random(f"pad-{service}-{self.seed}")
@@ -122,14 +92,6 @@ class ProbeEnv:
         return self._count(text)
 
     def metrics(self, service: str) -> str:
-        """Show current metrics of a service.
-
-        Args:
-            service: Name of the service, for example "orders".
-
-        Returns:
-            Error rate, p95 latency and throughput.
-        """
         if service not in SERVICES:
             return f"error: unknown service {service!r}"
         rng = random.Random(f"m-{service}-{self.seed}")
@@ -153,15 +115,6 @@ class ProbeEnv:
         return self._count(text)
 
     def submit_diagnosis(self, component: str, category: str) -> str:
-        """Submit the final diagnosis. Ends the investigation; call it exactly once.
-
-        Args:
-            component: The service that is the root cause.
-            category: One of config, resilience_config, resource_exhaustion, dependency_down.
-
-        Returns:
-            Confirmation that the diagnosis was recorded.
-        """
         if self.submitted is None:
             self.submitted = (component.strip().lower(), category.strip().lower())
         return "Diagnosis recorded. The episode is over; do not call more tools."
@@ -242,7 +195,6 @@ def run_grpo(args) -> dict:
         per_device_train_batch_size=args.batch,
         gradient_accumulation_steps=args.grad_accum,
         num_generations=args.generations,
-        # prompt + completion (model turns and tool results) must stay within the context cap
         max_completion_length=args.max_len - prompt_tokens - 16,
         max_tool_calling_iterations=args.max_turns,
         learning_rate=1e-5,
@@ -295,7 +247,7 @@ def run_memory(args) -> dict:
     model = AutoModelForCausalLM.from_pretrained(
         args.model, dtype=torch.float16, device_map={"": 0}
     )
-    model.train()  # HF only applies gradient checkpointing in training mode
+    model.train()
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
     model = get_peft_model(
@@ -313,7 +265,6 @@ def run_memory(args) -> dict:
                 out = model(input_ids=ids, logits_to_keep=completion + 1, use_cache=False)
                 logits = out.logits[:, :-1]
                 target = ids[:, -completion:]
-                # chunked log-softmax so the fp32 copy of the logits never exists at once
                 token_logps = []
                 for start in range(0, completion, 1024):
                     chunk = torch.log_softmax(logits[:, start : start + 1024].float(), dim=-1)
@@ -362,7 +313,7 @@ def main():
     try:
         result.update(run_grpo(args) if args.mode == "grpo" else run_memory(args))
         result["ok"] = True
-    except Exception:  # recorded, not hidden: the orchestrator reports it
+    except Exception:
         import traceback
 
         result["ok"] = False

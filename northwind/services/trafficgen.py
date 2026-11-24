@@ -1,9 +1,3 @@
-"""Background user traffic through the edge: browse, search, login, checkout, plus some bad
-input (wrong passwords, unknown products, invalid quantities). Users retry once on 5xx/429.
-
-etc/trafficgen.yaml: workers, think_time_ms [min, max], mix {journey: weight}, seed_file.
-"""
-
 import json
 import random
 import threading

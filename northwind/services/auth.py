@@ -1,9 +1,3 @@
-"""Users, login, JWT issue/verify. Serves HTTPS (edge and orders talk to it over TLS).
-
-The signing key is read from the key file named in etc/auth.yaml (signing_key.file) at
-start; rotating keys means writing a new file, updating kid, and restarting auth.
-"""
-
 import hashlib
 import hmac
 import secrets

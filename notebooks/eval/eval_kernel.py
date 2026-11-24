@@ -1,8 +1,3 @@
-"""Kaggle GPU eval: serve a model with vLLM, run OnCallGym episodes through verifiers'
-vf-run (the same eval path used for every reported number), save traces, trajectories and
-a summary. Built by build.py (CODE_TGZ, COMMIT, MODEL, TASKS, ROLLOUTS filled in).
-"""
-
 import base64
 import io
 import json
@@ -17,7 +12,7 @@ from pathlib import Path
 CODE_TGZ = None
 COMMIT = None
 MODEL = None
-TASKS = None  # e.g. "--env.taskset.variants 1"
+TASKS = None
 ROLLOUTS = None
 WORK = Path("/kaggle/working") if Path("/kaggle/working").is_dir() else Path.cwd() / "work"
 SRC = Path("/tmp/oncallgym-src")
@@ -110,14 +105,12 @@ def main():
     save()
     if proc.poll() is not None:
         return
-    # the agent's shell commands run as an unprivileged user
     sh(
         f"{vf}/bin/python -c 'from oncallgym.sandbox import ensure_agent_user, mode; "
         '[ensure_agent_user(f"agent{i}") for i in range(16)]; print(mode("agent0"))\'',
         "sandbox.log",
     )
     traj = WORK / "trajectories"
-    # Kaggle sets UV_SYSTEM_PYTHON, which breaks verifiers' `uv` harness script preparation
     run_env = {k: v for k, v in os.environ.items() if not k.startswith("UV_")}
     run_env.update(LOCAL_KEY="dummy", PATH=f"{vf}/bin:" + os.environ["PATH"])
     summary["removed_env"] = sorted(k for k in os.environ if k.startswith("UV_"))

@@ -1,10 +1,3 @@
-"""Prompt dataset for GRPO: one row per (family, variant), prompts from oncallgym.prompt
-(the same text the eval path sends). TRL passes each row's extra columns to
-OnCallEnv.reset(**row).
-
-    rows = build_rows("train", variants=range(8), repeats=1)
-"""
-
 from oncallgym.faults import make_fault
 from oncallgym.prompt import system_prompt, task_prompt
 from oncallgym.tasks import task_list

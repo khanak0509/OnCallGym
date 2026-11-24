@@ -1,5 +1,3 @@
-"""Products, search and pricing, with a read-through cache in front of catalog.db."""
-
 import json
 
 from northwind.lib.http import UpstreamError
@@ -16,8 +14,6 @@ def main():
     ttl = int(ccfg.get("ttl_s", 30))
     cols = "sku, name, category, description, price_cents"
 
-    # recommendations v2 (behind a flag): related products computed per request and kept
-    # in an in-process "session history" that is never trimmed
     history: list = []
     svc.metrics.gauge_fn("catalog_recommendation_history", lambda: len(history))
 
@@ -30,7 +26,7 @@ def main():
             "LIMIT 4",
             (category, sku),
         )
-        history.append((sku, b"r" * (kb * 1024)))  # written, so it is resident
+        history.append((sku, b"r" * (kb * 1024)))
         return [r["sku"] for r in related]
 
     def price(p):
@@ -110,7 +106,6 @@ def main():
         require(q, 400, "missing q")
         require(len(q) <= 64, 400, "query too long")
         if svc.build_flags.get("search_v2"):
-            # v2 ranks by tag matches; it expects the product_tags table from catalog 2.8
             rows = db.query(
                 f"SELECT {cols} FROM products p JOIN product_tags t ON t.sku=p.sku WHERE "
                 "p.active=1 AND t.tag LIKE ? GROUP BY p.sku ORDER BY COUNT(*) DESC LIMIT 20",

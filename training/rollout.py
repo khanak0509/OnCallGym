@@ -1,12 +1,3 @@
-"""TRL rollout_func: real OnCallGym episodes through the shared runner (oncallgym.runner),
-which is also what eval uses. Generation goes through TRL's vLLM client (weights already
-synced by TRL before this is called); environment tokens are masked via env_mask.
-
-The prompt rows only carry chat messages, so each prompt is mapped back to its task by
-its text (variants with identical alerts are interchangeable here; one is picked at
-random each time).
-"""
-
 import json
 import os
 import random
@@ -34,8 +25,6 @@ def make_rollout_func(
     dump_dir=None,
     dump_calls=0,
 ):
-    """dump_dir/dump_calls: save the token ids and vLLM logprobs of the first calls (to compare
-    with the trainer's own logprobs when debugging sampler/trainer mismatch)."""
     by_prompt: dict[str, list[dict]] = {}
     for r in rows:
         by_prompt.setdefault(json.dumps(r["prompt"], sort_keys=True), []).append(r)
@@ -43,8 +32,6 @@ def make_rollout_func(
     counter = [0, 0]
 
     def rollout_func(prompts, trainer):
-        # TRL's RepeatSampler already repeats each prompt num_generations times in a row, so
-        # one episode per received prompt; a group must all play the same task.
         n = trainer.num_generations
         vg = trainer.vllm_generation
         tok = trainer.processing_class

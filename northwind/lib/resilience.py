@@ -1,5 +1,3 @@
-"""Circuit breaker, retry with backoff, token bucket."""
-
 import random
 import threading
 import time
@@ -9,9 +7,6 @@ STATE_CODE = {CLOSED: 0, HALF_OPEN: 1, OPEN: 2}
 
 
 class CircuitBreaker:
-    """Opens after `failure_threshold` failures within `window_s`; after `reset_timeout_s`
-    it lets `half_open_max` trial calls through, closing again on success."""
-
     def __init__(self, failure_threshold=5, window_s=10.0, reset_timeout_s=5.0, half_open_max=1):
         self.failure_threshold = int(failure_threshold)
         self.window_s = float(window_s)
@@ -45,7 +40,6 @@ class CircuitBreaker:
             return True
 
     def release_trial(self):
-        """Give back a half-open trial slot when the call never reached the upstream."""
         with self._lock:
             if self.state == HALF_OPEN and self._trials > 0:
                 self._trials -= 1
@@ -71,7 +65,6 @@ class CircuitBreaker:
 
 
 def backoff_delays(retries: int, base_ms: float, max_ms: float, jitter: bool = True):
-    """Exponential backoff delays in seconds for `retries` retries."""
     for i in range(retries):
         d = min(max_ms, base_ms * (2**i))
         if jitter:

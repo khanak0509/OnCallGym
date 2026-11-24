@@ -1,6 +1,3 @@
-"""End to end through verifiers' vf-run with a scripted model (no GPU). Linux only; needs
-the env package installed: uv pip install -e environments/oncallgym_env"""
-
 import glob
 import json
 import os
@@ -73,6 +70,5 @@ def test_vf_run_scores_scripted_episode(tmp_path):
     tools = [e["name"] for e in events if e["kind"] == "tool"]
     assert tools == ["list_services", "logs", "submit_diagnosis"]
     fin = next(e for e in events if e["kind"] == "finish")["breakdown"]
-    # correct diagnosis, nothing fixed: only the root-cause component scores
     assert (fin["R"], fin["C"], fin["G"], fin["reward"]) == (0.0, 1.0, 1.0, 0.3)
     assert fin["termination"] == "submitted"

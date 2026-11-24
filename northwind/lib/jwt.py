@@ -1,5 +1,3 @@
-"""HS256 JSON Web Tokens with a key id (kid) header, stdlib only."""
-
 import base64
 import hashlib
 import hmac
@@ -28,7 +26,6 @@ def sign(claims: dict, key: bytes, kid: str) -> str:
 
 
 def verify(token: str, keys: dict[str, bytes], now: float | None = None) -> dict:
-    """Verify signature against the key named by the token's kid; check exp."""
     try:
         h, p, s = token.split(".")
         header = json.loads(_unb64(h))
@@ -48,7 +45,6 @@ def verify(token: str, keys: dict[str, bytes], now: float | None = None) -> dict
 
 
 def load_keys(entries: list[dict]) -> dict[str, bytes]:
-    """entries: [{kid, file}] -> {kid: key bytes}. Missing files are skipped."""
     keys = {}
     for e in entries or []:
         try:

@@ -1,18 +1,3 @@
-"""Spec 7.4 validation for fault variants.
-
-For each variant, on fresh stacks:
-  1 healthy before injection          probes pass
-  2 probes fail after injection       the parts named in fault.breaks fail
-  3 oracle fix -> solved, reward ~1   (with the correct diagnosis)
-  4 do nothing -> reward ~0           (no diagnosis)
-  5 restart all -> not solved         (unless fault.restart_fixable)
-  6 cheats -> integrity gate G = 0    (generic + family cheats)
-  7 invariants hold after the oracle  (part of 3: G = 1)
-  8 teardown leaves nothing behind
-
-    python -m oncallgym.validate [family ...] [--variants 0,1] [--skip-cheats]
-"""
-
 import argparse
 import json
 import os
@@ -38,7 +23,6 @@ def _diag(fault):
 
 
 def _episode(fault, seed, action, locked=True):
-    """Fresh stack with the fault, run `action(stack, agent_user)` -> diagnosis, verify."""
     s = Stack(seed=seed)
     user = None
     try:
@@ -93,14 +77,11 @@ def _healthy_then_broken(family, variant, seed):
 
 
 def _run_episode(family, variant, seed, action):
-    """action(stack, fault) -> diagnosis"""
     f = make_fault(family, variant)
     return _episode(f, seed, lambda s, user: action(s, f))
 
 
 def _solve_with_tools(family, variant, seed):
-    """Play the family's scripted solution through the real Episode tools (sandboxed
-    agent user, same limits). Proves the task is solvable with the agent's permissions."""
     from .episode import Episode
 
     ep = Episode(family, variant, seed)
@@ -118,7 +99,6 @@ def _solve_with_tools(family, variant, seed):
 
 
 def _run_agent_cheat(family, variant, seed, fn):
-    """Agent-level cheat through the sandbox. Returns (breakdown, error or None)."""
     f = make_fault(family, variant)
     err = {}
 

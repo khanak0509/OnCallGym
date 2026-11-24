@@ -1,18 +1,3 @@
-"""Build SFT warm-start data from scripted oracle trajectories (our own scripts only; no
-model outputs), played through real episodes and tokenized exactly like GRPO rollouts
-(oncallgym.runner.TokenRenderer: same chat template, tool schemas, enable_thinking=False,
-Hermes <tool_call> format). Each row stores input_ids and a mask that is 1 only on
-assistant tokens, so the loss is on assistant tokens only.
-
-Variety (all scripted): random extra investigation steps before the fix, harmless red
-herrings that are looked at and dismissed, a wrong first guess that gets corrected, the
-order of read-only investigation steps shuffled, and several phrasings per thought.
-Only episodes the verifier scores as solved are kept.
-
-    python training/sft_data.py --split train --variants 0-7 --per-task 4 \\
-        --tokenizer Qwen/Qwen3-1.7B --out data/sft_train.jsonl
-"""
-
 import argparse
 import json
 import os
@@ -55,10 +40,6 @@ OPENERS = [
         ],
     ),
 ]
-# Red herrings and wrong guesses teach "this looked fine, it was not the cause". They only
-# use services that are never a held-out (test split) root cause, so the data does not teach
-# the model to dismiss auth, cache, payments, ... (checked in tests/test_sft_data.py), and
-# never the current episode's own root-cause service.
 HERRING_SERVICES = ["scheduler", "inventory", "catalog", "flags"]
 HERRING_THOUGHTS = [
     "Those warnings look like routine noise, not the incident. Moving on.",
@@ -90,7 +71,6 @@ def is_mutating(step):
 
 
 def vary(steps, rng, component):
-    """Scripted variations around a family's solution_steps."""
     steps = list(steps)
     first_mut = next((i for i, s in enumerate(steps) if is_mutating(s)), len(steps))
     investigate, rest = steps[:first_mut], steps[first_mut:]

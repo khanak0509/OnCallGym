@@ -1,33 +1,10 @@
-"""Run agent shell commands as a separate, unprivileged Unix user.
-
-The agent may read the deployment (configs, logs, databases) and edit config files in
-etc/, but it must not be able to write databases, the email outbox, logs, code, or
-verifier material, and it must not be able to signal service processes. That is
-enforced by the OS: services run as the stack owner, agent commands run as an agent user.
-
-Each concurrent episode (port block) has its own agent user (agent0..agent15), so after
-every command we can SIGKILL all of that user's processes: nothing the agent starts
-(background jobs, setsid'd daemons) outlives the command. At episode start and end the
-user's files in /tmp are wiped, so nothing carries over between episodes.
-
-Permissions applied to an episode home (owner = the user running the stack):
-  home, data/, logs/, run/          0755 (agent can read, not write)
-  data/* and logs/* files           0644
-  run/internal.token                0600 (service-to-service token, agent cannot read)
-  etc/ and subdirs                  0777 + files 0666 (agent may edit and add files)
-  private dir                       0700 (agent cannot read)
-
-How we switch user: as root (Kaggle) we setuid in the child; otherwise via
-`sudo -n -u agentN` (the dev container grants exactly that).
-"""
-
 import os
 import pwd
 import shutil
 import subprocess
 
 AGENT_PREFIX = os.environ.get("ONCALLGYM_AGENT_PREFIX", "agent")
-MAX_AGENT_USERS = 16  # concurrent episodes per machine
+MAX_AGENT_USERS = 16
 MAX_OUTPUT = 2000
 DEFAULT_TIMEOUT_S = 10.0
 PRIVATE_FILES = {os.path.join("run", "internal.token")}
@@ -50,8 +27,6 @@ def agent_ids(user: str):
 
 
 def ensure_agent_user(user: str):
-    """Create the agent user when running as root (Kaggle VMs). The dev container image
-    already has agent0..agent15."""
     if agent_ids(user) is not None:
         return
     if os.geteuid() != 0:
@@ -117,13 +92,11 @@ def _as_user(user: str, argv: list[str], cwd: str, env: dict, timeout: float):
 
 
 def kill_all(user: str):
-    """SIGKILL every process of the agent user."""
     for _ in range(2):
         _as_user(user, ["/bin/sh", "-c", "kill -9 -1 2>/dev/null; true"], "/", {}, 10)
 
 
 def wipe(user: str):
-    """Kill the agent user's processes and delete everything it left in temp dirs."""
     kill_all(user)
     _as_user(
         user,
@@ -139,11 +112,6 @@ def wipe(user: str):
 
 
 def protect_code(user: str):
-    """Make the code root (northwind/, oncallgym/, training/) unreadable to agent users:
-    only the stack owner, which runs the services and the verifier, may read it. Without
-    this an agent could import the fault definitions or regenerate the pristine configs.
-    Verified by trying as the agent user (some bind mounts ignore modes); raises if the
-    code is still readable."""
     import northwind
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(northwind.__file__)))
@@ -178,7 +146,7 @@ def lock_down(home: str, user: str):
         rel = os.path.relpath(root, home)
         top = rel.split(os.sep)[0]
         if top == "etc":
-            os.chmod(root, 0o777)  # no sticky bit: sed -i style edits must work
+            os.chmod(root, 0o777)
             for f in files:
                 os.chmod(os.path.join(root, f), 0o666)
         else:
@@ -192,8 +160,6 @@ def lock_down(home: str, user: str):
 
 
 def run(user: str, command: str, cwd: str, timeout_s: float = DEFAULT_TIMEOUT_S) -> dict:
-    """Run one shell command as the agent user. Output is merged and truncated. Every
-    process the command started is killed afterwards."""
     home = home_of(user)
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",

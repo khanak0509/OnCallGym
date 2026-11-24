@@ -1,17 +1,3 @@
-"""Run many episodes through the shared AgentLoop with token-level bookkeeping.
-
-The same function serves training (TRL rollout_func, generation through TRL's vLLM
-client) and eval (generation through an HTTP server). Only `generate` differs:
-
-    generate(list_of_token_id_lists, max_new_tokens) -> list of (token_ids, logprobs)
-
-Per episode it returns prompt_ids, completion_ids (model tokens followed by environment
-tokens), logprobs (0.0 on environment tokens), env_mask (1 = model token) and the
-verifier breakdown. Prompts are rendered with the tokenizer's chat template, the core tool
-schemas and enable_thinking=False; environment messages are appended as the template
-renders them (same scheme as TRL's own tool loop).
-"""
-
 import concurrent.futures as cf
 
 from .episode import Episode, tool_schemas
@@ -36,10 +22,6 @@ class TokenRenderer:
         )
 
     def suffix_ids(self, env_messages):
-        """Tokens that follow an assistant turn (which ends with <|im_end|>): the
-        environment messages plus the next assistant header. Rendered with the chat
-        template after a dummy assistant turn and cut right after that turn's <|im_end|>
-        (ChatML templates such as Qwen's)."""
         dummy = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]
         text = self.tok.apply_chat_template(
             dummy + env_messages,
@@ -67,7 +49,6 @@ def run_episodes(
     start_workers=8,
     verify_workers=8,
 ):
-    """specs: list of dicts with family, variant, seed. Returns one result dict per spec."""
     r = TokenRenderer(tokenizer)
     eps = [Episode(s["family"], int(s["variant"]), int(s.get("seed", s["variant"]))) for s in specs]
     loops = [AgentLoop(e) for e in eps]
@@ -84,7 +65,6 @@ def run_episodes(
             active = [i for i, lp in enumerate(loops) if not lp.done]
             if not active:
                 break
-            # real token budget: stop before the context cannot hold another turn
             for i in list(active):
                 if len(state[i]["seq"]) + max_turn_tokens > max_model_len:
                     loops[i].ep._end("context_exhausted")

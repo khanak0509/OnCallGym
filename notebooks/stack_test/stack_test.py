@@ -1,16 +1,3 @@
-"""Kaggle stack test: what does the real T4 x2 image give us, and what does one GRPO step cost?
-
-Runs top to bottom on a Kaggle GPU (T4 x2) session with internet on. Everything lands in
-/kaggle/working/stack_test/: summary.json plus per-stage logs. Nothing here touches any
-account credentials.
-
-Stages
-  1. environment report (GPU, driver, CUDA, Python, preinstalled torch/transformers, CPU, RAM, disk)
-  2. verifiers==0.4.1 in its own venv, import check
-  3. training stack (trl + vllm + peft) in its own venv, resolved versions recorded
-  4. per model: worst-case memory probe on GPU0, then real GRPO steps with vLLM on GPU1
-"""
-
 import json
 import os
 import shutil
@@ -27,9 +14,7 @@ MODELS = ["Qwen/Qwen3-4B-Instruct-2507", "Qwen/Qwen3-1.7B"]
 TRAIN_PKGS = ["trl[vllm,peft]==1.18.0", "vllm==0.33.0", "datasets"]
 PY = "3.12"
 
-# replaced by build.py with the contents of grpo_probe.py
 PROBE_SRC = None
-# "full": every stage for both models. "caps4b": 4B only, GRPO at 8k, then 7k, then 6k context.
 PLAN = "full"
 CAPS = [8192, 7168, 6144]
 PEAK_LIMIT_GB = 14.0
@@ -43,7 +28,6 @@ def save():
 
 
 def sh(cmd: str, log: str, env: dict | None = None, timeout: int = 3600) -> tuple[int, float, str]:
-    """Run a shell command, tee to a log file, return (code, seconds, last lines)."""
     t0 = time.time()
     path = LOGS / log
     with open(path, "w") as f:
@@ -236,8 +220,6 @@ def stage_model(model: str, probe: Path):
 
 
 def judge_cap(result_file: Path, cap: int) -> dict:
-    """Pass if training ran, peak reserved memory and every step time are under the limits,
-    and rollouts actually reached the cap (some were clipped at it)."""
     if not result_file.exists():
         return {"cap": cap, "passed": False, "reason": "no result file (process crashed)"}
     r = json.loads(result_file.read_text())

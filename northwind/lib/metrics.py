@@ -1,5 +1,3 @@
-"""Small Prometheus-style metrics registry rendered as text at /metrics."""
-
 import threading
 
 DEFAULT_BUCKETS = (5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)
@@ -35,7 +33,6 @@ class Registry:
             self._gauges[self._key(name, labels)] = float(value)
 
     def gauge_fn(self, name: str, fn, **labels):
-        """Register a gauge computed at scrape time (fn returns a float)."""
         self._gauge_fns[self._key(name, labels)] = fn
 
     def observe(self, name: str, value_ms: float, buckets=DEFAULT_BUCKETS, **labels):
@@ -44,7 +41,7 @@ class Registry:
             self._buckets.setdefault(name, buckets)
             h = self._hists.get(k)
             if h is None:
-                h = [0] * (len(buckets) + 1) + [0.0, 0]  # bucket counts, +Inf, sum, count
+                h = [0] * (len(buckets) + 1) + [0.0, 0]
                 self._hists[k] = h
             for i, b in enumerate(buckets):
                 if value_ms <= b:
@@ -81,7 +78,6 @@ class Registry:
 
 
 def parse_text(text: str) -> list[tuple[str, dict, float]]:
-    """Parse the text format back into (name, labels, value) samples."""
     out = []
     for line in text.splitlines():
         if not line or line.startswith("#"):

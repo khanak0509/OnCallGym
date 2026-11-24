@@ -1,8 +1,5 @@
-"""Service registry: names, port offsets, dependencies, start layers, memory limits."""
-
 BLOCK_SIZE = 20
 
-# name: (port offset, start layer, depends on, role)
 SERVICES = {
     "broker": (
         10,
@@ -65,7 +62,6 @@ DATABASES = {
     "provider": "provider",
 }
 
-# per-process memory limit enforced by the supervisor (RSS); generous for normal operation
 MEMORY_LIMIT_MB = {name: 120 for name in SERVICES}
 
 

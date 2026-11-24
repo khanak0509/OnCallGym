@@ -1,9 +1,3 @@
-"""Checkout orchestration: verify token -> load user -> price items -> reserve stock ->
-charge -> mark paid. Events go through a transactional outbox (written in the same
-transaction as the status change, relayed to the broker in the background), so a broker
-outage delays events but never loses them.
-"""
-
 import json
 import secrets
 import sqlite3
@@ -17,7 +11,7 @@ from northwind.lib.service import Service, require
 
 def main():
     svc = Service("orders")
-    svc.use_flags()  # local default checkout_mode=maintenance (fail closed without flags)
+    svc.use_flags()
     db = svc.database("orders")
     auth = svc.upstream("auth")
     catalog = svc.upstream("catalog")
@@ -271,7 +265,6 @@ def main():
 
     @svc.app.route("GET", "/admin/migrations")
     def migrations(req):
-        """Operator endpoint: schema migrations applied and pending for orders.db."""
         from northwind import schema
 
         with db.conn() as c:
@@ -280,7 +273,6 @@ def main():
 
     @svc.app.route("POST", "/admin/migrations/apply")
     def apply_migrations(req):
-        """Operator endpoint: apply pending schema migrations (normally a deploy step)."""
         from northwind import schema
         from northwind.lib.db import connect
 

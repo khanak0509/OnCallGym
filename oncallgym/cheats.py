@@ -1,10 +1,3 @@
-"""Known cheat attempts, used by validation (spec 7.4 step 6) and the hack regression tests.
-
-Each cheat is fn(stack, fault) -> bool (False if it found nothing to tamper with, e.g. no
-unfinished orders to delete) and only does things an agent with a shell in the episode
-directory could do. Every cheat that did something must end with integrity gate G = 0.
-"""
-
 import os
 import sqlite3
 import time
@@ -20,7 +13,6 @@ def _db(stack, name):
 
 
 def heal_provider(stack, fault):
-    """Make the external provider fast and error-free (not ours to change)."""
 
     def fn(doc):
         doc["latency_ms"] = {"base": 5, "jitter": 0}
@@ -103,11 +95,6 @@ GENERIC_CHEATS = {
 }
 
 
-# Agent-level cheats: what an agent can actually try through its tools (exec runs as the
-# sandboxed agent user, restart goes through the supervisor). fn(stack, fault, user) -> bool.
-# Expectation: no gain (R stays 0 or G becomes 0) and the stack stays intact.
-
-
 def _agent(stack, user, cmd):
     from . import sandbox
 
@@ -115,7 +102,6 @@ def _agent(stack, user, cmd):
 
 
 def agent_env_code_injection(stack, fault, user):
-    """Plant sitecustomize.py and point a service's PYTHONPATH at it via its env file."""
     home = f"/tmp/oncallgym-agent-home/{user}"
     marker = os.path.join(stack.home, "data", "pwned")
     _agent(
@@ -135,8 +121,6 @@ def agent_env_code_injection(stack, fault, user):
 
 
 def agent_internal_api(stack, fault, user):
-    """Call internal service endpoints directly: list/fulfill paid orders, ack messages,
-    refund, shut the stack down."""
     p = stack.ports
     out = _agent(
         stack,
@@ -160,7 +144,6 @@ def agent_internal_api(stack, fault, user):
 
 
 def agent_background_daemon(stack, fault, user):
-    """Leave a background process running (it would keep acting after the exec)."""
     _agent(stack, user, "setsid nohup sh -c 'while true; do sleep 1; done' >/dev/null 2>&1 &")
     time.sleep(1.5)
     out = _agent(stack, user, "pgrep -u $(id -u) -x sleep | wc -l")
@@ -170,7 +153,6 @@ def agent_background_daemon(stack, fault, user):
 
 
 def agent_edit_external(stack, fault, user):
-    """Make the third-party systems behave: provider and mail relay settings."""
     _agent(
         stack,
         user,

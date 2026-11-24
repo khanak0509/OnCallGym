@@ -1,5 +1,3 @@
-"""Training (TRL) and eval (verifiers) adapters expose exactly the core tools and prompt."""
-
 import asyncio
 import inspect
 import sys
@@ -51,8 +49,6 @@ def test_trl_dataset_prompt_is_core_prompt():
 
 
 def test_training_and_eval_share_the_runner():
-    """Training (TRL rollout_func) and eval drive episodes through the same function, which
-    uses the same loop (nudge, parsing) and renderer (template, schemas, no thinking)."""
 
     import oncallgym.evaluate as ev
     import training.rollout as ro

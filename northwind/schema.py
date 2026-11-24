@@ -1,10 +1,3 @@
-"""Database schemas as ordered migrations per database file.
-
-Stack creation applies every migration and records it in schema_migrations. Services do
-not migrate on start (like most production setups, migrations are a deploy step), but they
-check that the schema version they need is present and report not-ready otherwise.
-"""
-
 MIGRATIONS: dict[str, list[tuple[int, str]]] = {
     "users": [
         (
@@ -104,7 +97,6 @@ CREATE TABLE refunds (id TEXT PRIMARY KEY, charge_id TEXT NOT NULL, amount_cents
     ],
 }
 
-# version each service requires (services report not-ready below this)
 REQUIRED = {"users": 2, "catalog": 2, "inventory": 1, "orders": 2, "payments": 1, "provider": 1}
 
 

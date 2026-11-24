@@ -1,5 +1,3 @@
-"""SFT data must not teach the model to dismiss held-out root causes, nor the episode's own."""
-
 import random
 
 from oncallgym.faults import make_fault

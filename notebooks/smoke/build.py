@@ -1,9 +1,3 @@
-"""Bundle the repo code into one Kaggle CPU script kernel.
-
-Usage: python build.py <kaggle-username> <output-dir>
-Then:  kaggle kernels push -p <output-dir>
-"""
-
 import base64
 import io
 import json

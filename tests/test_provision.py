@@ -23,7 +23,6 @@ def test_provision_is_deterministic(tmp_path):
     vb = json.load(open(tmp_path / "pb" / "verifier.json"))
     assert va["seed_hashes"]["catalog.products"] == vb["seed_hashes"]["catalog.products"]
     assert [u["email"] for u in va["probe_users"]] == [u["email"] for u in vb["probe_users"]]
-    # probe passwords must not be derivable from the seed
     assert [u["password"] for u in va["probe_users"]] != [u["password"] for u in vb["probe_users"]]
     assert os.stat(tmp_path / "pa").st_mode & 0o077 == 0
 
@@ -35,7 +34,6 @@ def test_provision_layout(tmp_path):
         cfg = yaml.safe_load(open(home / "etc" / f"{name}.yaml"))
         assert cfg["listen"]["port"] == 30000 + SERVICES[name][0]
         assert (home / "etc" / "env" / f"{name}.env").exists()
-    # verifier secrets are not inside the deployment directory
     assert not any("verifier" in f for _, _, fs in os.walk(home) for f in fs)
     manifest = json.load(open(home / "data/seed/manifest.json"))
     probe = json.load(open(private / "verifier.json"))["probe_users"]

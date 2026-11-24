@@ -1,18 +1,3 @@
-"""GRPO (TRL) with LoRA on OnCallGym train families. Rollouts are real episodes through
-training/rollout.py (TRL rollout_func) and the shared runner/loop in oncallgym (the same code
-eval uses: Episode, tools, nudge on text-only replies, verifier).
-
-    trl vllm-serve --model Qwen/Qwen3-1.7B ... (GPU 1)
-    python training/grpo.py --out runs/grpo --adapter runs/sft/adapter --steps 60
-
-Logs, per the owner's requirements for the first real run:
-  - input length of every trainer forward pass (fails loudly if it is shorter than the
-    rollouts' prompt + completion incl. tool tokens)
-  - peak GPU memory per step, GradScaler scale and skipped (overflow) steps
-  - termination reasons (context_exhausted etc.) and reward components per rollout
-Checkpoints the adapter every --save-every steps so runs can resume across sessions.
-"""
-
 import argparse
 import json
 import math
@@ -43,11 +28,8 @@ def main():
     ap.add_argument(
         "--is-mode", default=None, help="vllm_importance_sampling_mode (TRL default if unset)"
     )
-    # same sampler as oncallgym.evaluate (T 0.7 is passed by the kernel, top_p/top_k here)
     ap.add_argument("--top-p", type=float, default=0.95)
     ap.add_argument("--top-k", type=int, default=20)
-    # with the race-free sync the measured gap is 0.003-0.02 (top_k/top_p renormalization in
-    # vLLM's logprobs adds a little); the racy sync gave 0.13 at step 1 and ~0.8 later
     ap.add_argument("--max-logp-gap", type=float, default=0.1)
     ap.add_argument(
         "--debug-dump", type=int, default=0, help="dump tokens+logprobs of first N calls"
@@ -96,11 +78,9 @@ def main():
                 f.write(json.dumps(rec, default=str) + "\n")
             if "grad_norm" in rec:
                 grad_norms.append(rec["grad_norm"])
-            # every sequence masked by importance sampling gives exactly zero gradient
             if len(grad_norms) >= 3 and not any(grad_norms):
                 print("grad_norm is 0 on the first 3 steps, stopping", flush=True)
                 control.should_training_stop = True
-            # vLLM must sample from the trainer's weights (see training/vllm_sync.py)
             gap = rec.get("sampling/sampling_logp_difference/mean")
             if gap is not None and gap > a.max_logp_gap:
                 print(f"trainer/vLLM logprob gap {gap} > {a.max_logp_gap}, stopping", flush=True)
@@ -128,7 +108,7 @@ def main():
         per_device_train_batch_size=1,
         gradient_accumulation_steps=a.grad_accum,
         num_generations=a.generations,
-        max_completion_length=a.max_len - 600,  # the runner ends episodes before the context cap
+        max_completion_length=a.max_len - 600,
         learning_rate=a.lr,
         fp16=True,
         bf16=False,
@@ -165,9 +145,7 @@ def main():
     if a.adapter or peft_config is not None:
         from training.vllm_sync import make_safe_peft_iter
 
-        # TRL's merge/push/unmerge races vLLM's side-stream copies (see training/vllm_sync.py)
         trainer.vllm_generation._iter_named_params = make_safe_peft_iter(trainer.vllm_generation)
-    # record the real input length of every policy forward pass (owner requirement)
     orig = trainer._get_per_token_logps_and_entropies
 
     dumped = [0]

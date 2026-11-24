@@ -1,5 +1,3 @@
-"""Regression tests for the checkpoint 3 sandbox hardening (HACKS.md 23-25)."""
-
 import os
 import platform
 
@@ -56,7 +54,6 @@ def test_fault_injection_leaves_no_timestamps(tmp_path, family):
         configure_quietly(s, make_fault(family, 0))
         after = _snapshot_times(s.home)
         newest_before = max(t[1] for t in before.values())
-        # modification times (access times change whenever anyone lists a directory)
         changed = [p for p, t in after.items() if p in before and t[1] != before[p][1]]
         newer = [p for p, t in after.items() if t[1] > newest_before]
         assert not changed and not newer, (changed, newer)

@@ -1,5 +1,3 @@
-"""Consumes order.paid, creates a shipment through the orders API."""
-
 import hashlib
 
 from northwind.lib.broker_client import Consumer
@@ -30,8 +28,6 @@ def main():
 
     @svc.app.route("POST", "/admin/redrive")
     def redrive(req):
-        """Operator endpoint: ship every paid order that is still unshipped (after an
-        outage or a dry-run period)."""
         if warehouse == "DRYRUN":
             return 409, {"error": "dry-run mode: set FULFILLMENT_WAREHOUSE_ID first"}
         r = orders.get("/orders?status=paid&older_than_s=0")
@@ -52,7 +48,6 @@ def main():
             return
         r, tracking = ship(oid)
         if r.status == 409:
-            # refunded or failed orders are not shipped; ack and move on
             svc.log.warn("skipping shipment", order=oid, reason=r.json().get("error"))
             return
         if not r.ok:

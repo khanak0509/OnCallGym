@@ -1,6 +1,3 @@
-"""Verifiers v1 taskset for OnCallGym (eval path). Thin adapter over oncallgym.Episode:
-setup starts an episode host process, tools forward to it, scoring asks it to verify."""
-
 import asyncio
 import json
 import os
@@ -137,4 +134,4 @@ class OnCallTaskset(Taskset[OnCallTask, OnCallConfig]):
             )
 
 
-assert FAMILIES  # families are registered on import
+assert FAMILIES

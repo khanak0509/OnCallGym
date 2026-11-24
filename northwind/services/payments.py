@@ -1,6 +1,3 @@
-"""Charges orders through the external provider: idempotency keys, retries with backoff and
-a circuit breaker on the provider client (settings in etc/payments.yaml upstreams.provider)."""
-
 import secrets
 import sqlite3
 import time
@@ -94,8 +91,6 @@ def main():
 
     @svc.app.route("POST", "/refunds", internal=True)
     def refund(req):
-        """Refund every successful provider charge for an order. The provider is the source
-        of truth: a charge can have succeeded there even if our attempt timed out."""
         order_id = req.json.get("order_id")
         require(order_id, 400, "order_id required")
         try:

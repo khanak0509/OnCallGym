@@ -1,16 +1,3 @@
-"""Start, stop and clean up one Northwind deployment ("stack") for an episode.
-
-Each stack gets its own directory and its own block of ports. A port block is claimed by
-holding an flock on a lock file, so concurrent stacks (threads or processes) never
-collide, and a crashed owner releases its block automatically.
-
-    with Stack(seed=3) as s:      # create + start, stop + delete on exit
-        s.ports["edge"]
-
-CLI (run inside the dev container or on a Linux VM, never on a macOS host):
-    python -m oncallgym.stack up | probe | parallel N | clean
-"""
-
 import contextlib
 import fcntl
 import http.client
@@ -44,7 +31,6 @@ class HostNotAllowed(RuntimeError):
 
 
 def assert_contained():
-    """Services and agent commands must never run directly on the owner's macOS host."""
     if platform.system() == "Darwin":
         raise HostNotAllowed(
             "refusing to start Northwind on a macOS host; run inside the dev "
@@ -68,8 +54,6 @@ LOCK_DIR = os.environ.get(
 
 
 def _sweep_stale(owner: str):
-    """The previous holder of this block died without cleaning up: kill whatever is left
-    of its stack and delete its directories (spec: cleanup even on crash)."""
     try:
         info = json.loads(owner)
     except ValueError:
@@ -85,8 +69,6 @@ def _sweep_stale(owner: str):
 
 
 def claim_port_block(home: str, private: str) -> tuple[int, int]:
-    """Return (block index, lock fd). The fd must stay open while the stack lives. Locks
-    are machine-wide (not per root) so stacks under different roots never share ports."""
     os.makedirs(LOCK_DIR, exist_ok=True)
     for i in range(MAX_BLOCKS):
         fd = os.open(os.path.join(LOCK_DIR, f"block-{i}.lock"), os.O_CREAT | os.O_RDWR, 0o600)
@@ -137,7 +119,6 @@ class Stack:
         self.proc: subprocess.Popen | None = None
         self.timings: dict[str, float] = {}
 
-    # lifecycle
     def create(self):
         t0 = time.time()
         self.block, self._lock_fd = claim_port_block(self.home, self.private)
@@ -148,14 +129,11 @@ class Stack:
         return self
 
     def start(self, timeout_s: float = 30.0, require_ready: bool = True):
-        """Start the supervisor and wait for boot. With require_ready (default) also wait
-        until every service is ready; a stack started with a fault may never be."""
         assert_contained()
         if not self.ports:
             self.create()
         t0 = time.time()
         log = open(os.path.join(self.home, "logs/supervisor.stdout"), "ab")
-        # services run with cwd=home, so make the code importable whether or not it is installed
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join(
             [CODE_ROOT] + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
@@ -220,7 +198,6 @@ class Stack:
         return read_token(self.home)
 
     def call(self, service: str, method: str, path: str, body=None, timeout=10.0):
-        """HTTP call to one of this stack's services with the internal token."""
         return http_json(self.ports[service], method, path, body, timeout=timeout, token=self.token)
 
     def services(self) -> list[dict]:
@@ -234,7 +211,6 @@ class Stack:
         return self.call("supervisor", "POST", "/restart-all", timeout=90)
 
     def total_rss_mb(self) -> float:
-        """RSS of the supervisor plus every service process."""
         from northwind.supervisor import rss_of
 
         total = rss_of(self.proc.pid) or 0
@@ -253,7 +229,6 @@ class Stack:
             self.proc.wait(15)
         except subprocess.TimeoutExpired:
             pass
-        # whatever is left in the process group gets killed
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(pgid, sig)
@@ -269,8 +244,6 @@ class Stack:
         shutil.rmtree(self.home, ignore_errors=True)
         shutil.rmtree(self.private, ignore_errors=True)
         if self._lock_fd is not None:
-            # lock files are not unlinked (that would race with a waiting claimer); mark the
-            # block as cleanly released so the next claimer has nothing to sweep
             with contextlib.suppress(OSError):
                 os.ftruncate(self._lock_fd, 0)
             os.close(self._lock_fd)
@@ -290,7 +263,6 @@ class Stack:
 
 
 def leftover_processes(root: str | None = None) -> list[int]:
-    """PIDs of any Northwind processes whose command line references this root."""
     root = root or default_root()
     pids = []
     proc = "/proc"
@@ -310,8 +282,6 @@ def leftover_processes(root: str | None = None) -> list[int]:
 
 
 def clean(root: str | None = None) -> dict:
-    """Kill every Northwind process under root, delete root, and reset port locks that no
-    live stack holds."""
     root = root or default_root()
     killed = []
     for pid in leftover_processes(root):
@@ -327,7 +297,7 @@ def clean(root: str | None = None) -> dict:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                continue  # a live stack (possibly under another root) holds it
+                continue
             finally:
                 os.close(fd)
             os.unlink(path)

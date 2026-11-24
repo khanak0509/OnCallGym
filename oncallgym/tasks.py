@@ -1,8 +1,5 @@
-"""Task list and train/test split by fault family (spec 7.5). Deterministic."""
-
 from .faults import FAMILIES
 
-# held-out families: never trained on (rationale in the README / DECISIONS)
 TEST_FAMILIES = {
     "jwt_key_rotation_mismatch",
     "orders_config_drift",

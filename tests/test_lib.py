@@ -46,7 +46,7 @@ def test_breaker_opens_and_recovers():
     assert b.state == OPEN and not b.allow()
     time.sleep(0.12)
     assert b.allow() and b.state == HALF_OPEN
-    assert not b.allow()  # only one trial call
+    assert not b.allow()
     b.success()
     assert b.state == CLOSED
 
@@ -118,5 +118,5 @@ def test_breaker_releases_trial_without_verdict():
     b.failure()
     time.sleep(0.02)
     assert b.allow() and b.state == HALF_OPEN
-    b.release_trial()  # e.g. local pool exhausted: the upstream was never called
+    b.release_trial()
     assert b.allow()

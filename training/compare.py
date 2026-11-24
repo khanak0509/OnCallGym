@@ -1,18 +1,3 @@
-"""Paired comparison of two eval runs on the same tasks (oncallgym.evaluate output dirs).
-
-    python training/compare.py runs/post_sft runs/post_grpo
-
-Per task: solve rate and mean reward of A and B. Overall difference with a bootstrap CI over
-tasks (tasks are the unit, samples within a task are correlated) and a sign-flip permutation
-p-value on the per-task differences. Variants of one family share most of their prompt and
-fix, so tasks are not independent either: the family-level line averages the differences per
-family and runs an exact sign-flip test over families (with 4 families the smallest possible
-p is 0.125, so it can only ever be "not significant" or borderline).
-
-Refuses a run without meta.json (a timed-out or partial eval) and warns when tasks have
-different episode counts in A and B.
-"""
-
 import itertools
 import json
 import random

@@ -1,7 +1,3 @@
-"""Harmless background log lines (red herrings). Real services always log some warnings
-that have nothing to do with the incident at hand; an on-call engineer must not chase
-them. Rate and content are deterministic per (service, seed)."""
-
 import random
 
 COMMON = [

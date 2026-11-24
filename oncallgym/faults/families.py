@@ -1,5 +1,3 @@
-"""Fault families. Spec numbers refer to ONCALLGYM_SPEC.md section 7.1."""
-
 import json
 import os
 import time
@@ -26,8 +24,6 @@ def _with_port(url: str, port: int) -> str:
 
 
 class EdgeWrongUpstreamPort(Fault):
-    """Spec 2. A routing change left one edge upstream pointing at the wrong port."""
-
     family = "edge_wrong_upstream_port"
     spec_number = 2
     category = "config"
@@ -35,8 +31,6 @@ class EdgeWrongUpstreamPort(Fault):
 
     def choose_params(self, rng):
         upstream = rng.choice(["catalog", "orders", "auth"])
-        # a port inside this stack's own block: either unused (connection refused) or
-        # another of our services (wrong service answers, 404s)
         wrong_offset = rng.choice([16, 17, 18, 19, "neighbour"])
         return {"upstream": upstream, "wrong_offset": wrong_offset}
 
@@ -131,11 +125,6 @@ class EdgeWrongUpstreamPort(Fault):
 
 
 class OrdersPaymentsTimeoutInversion(Fault):
-    """Spec 7. The payment provider is degraded (slow but working). payments->provider
-    has a generous timeout, but orders->payments was tuned much lower, so orders gives up
-    while payments is still waiting on the provider: checkouts fail with 504 at the edge
-    even though many charges succeed (the scheduler later refunds those)."""
-
     family = "orders_payments_timeout_inversion"
     spec_number = 7
     category = "resilience_config"
@@ -148,7 +137,6 @@ class OrdersPaymentsTimeoutInversion(Fault):
             "provider_base_ms": base,
             "provider_jitter_ms": 300,
             "payments_timeout_ms": 2500,
-            # always below the provider's minimum latency, so every checkout times out
             "orders_timeout_ms": base - rng.choice([200, 300, 400]),
         }
 
@@ -189,7 +177,6 @@ class OrdersPaymentsTimeoutInversion(Fault):
     def root_cause_fixed(self, stack):
         orders = effective_config(stack, "orders")["upstreams"]["payments"]
         pay = effective_config(stack, "payments")["upstreams"]["provider"]
-        # the outer call must wait longer than one inner attempt
         return int(orders["timeout_ms"]) > int(pay["timeout_ms"])
 
     def solution_steps(self, stack):
@@ -249,18 +236,13 @@ class OrdersPaymentsTimeoutInversion(Fault):
 
 
 class CatalogLeakFlag(Fault):
-    """Spec 12. A feature flag turns on catalog's new recommendations code, which leaks
-    memory on every request; catalog hits its memory limit, is OOM-killed and restarted in
-    a loop, so browsing fails intermittently. Restarting does not help (the flag stays on)."""
-
     family = "catalog_leak_flag"
     spec_number = 12
     category = "resource_exhaustion"
     tier = "medium"
-    breaks = ("window",)  # intermittent: a single journey may slip through between OOM kills
+    breaks = ("window",)
     settle_s = 25.0
 
-    # the leak is in catalog, the switch that enables it is a flag served by flags
     also_accepted = ("flags",)
 
     def choose_params(self, rng):
@@ -342,15 +324,11 @@ class CatalogLeakFlag(Fault):
 
 
 class JwtKeyRotationMismatch(Fault):
-    """Spec 14. Auth's signing key was rotated (new kid) but orders still only trusts the
-    old key, so every checkout is rejected with 401 although login works."""
-
     family = "jwt_key_rotation_mismatch"
     spec_number = 14
     category = "auth"
     tier = "easy"
 
-    # rolling auth back to the old key is also a valid fix
     also_accepted = ("auth",)
 
     def choose_params(self, rng):
@@ -439,17 +417,12 @@ class JwtKeyRotationMismatch(Fault):
 
 
 class PoisonMessage(Fault):
-    """Spec 18. fulfillment's queue is strictly ordered (shipments go out in payment order)
-    and retries failed messages forever. A malformed order.paid event (old producer schema)
-    sits at the head of the queue and fails on every delivery, so no order is shipped."""
-
     family = "poison_message"
     spec_number = 18
     category = "data"
     tier = "medium"
     settle_s = 4.0
 
-    # the message sits in the broker queue that fulfillment consumes
     also_accepted = ("broker",)
 
     def choose_params(self, rng):
@@ -556,9 +529,6 @@ class PoisonMessage(Fault):
 
 
 class WrongDatabasePath(Fault):
-    """Spec 1. A config change points one service at a database file that does not exist;
-    SQLite silently creates an empty one, so every query fails with "no such table"."""
-
     family = "wrong_database_path"
     spec_number = 1
     category = "config"
@@ -585,7 +555,6 @@ class WrongDatabasePath(Fault):
     def configure(self, stack):
         wrong = self.params["wrong"]
         if wrong.startswith("/var/lib"):
-            # absolute path into a directory that does not exist inside the episode
             wrong = "data/missing-volume/" + os.path.basename(wrong)
             self.params["wrong"] = wrong
         edit_service_config(stack, self.params["service"], lambda d: d["db"].update(path=wrong))
@@ -642,9 +611,6 @@ class WrongDatabasePath(Fault):
 
 
 class EdgeRateLimitTooLow(Fault):
-    """Spec 3. A rate-limit change at the edge set the per-client limit to almost zero;
-    most requests get 429."""
-
     family = "edge_rate_limit_too_low"
     spec_number = 3
     category = "config"
@@ -714,10 +680,6 @@ class EdgeRateLimitTooLow(Fault):
 
 
 class FulfillmentWrongTopic(Fault):
-    """Spec 4. fulfillment was redeployed subscribed to a misspelled topic, so its queue no
-    longer receives order.paid events and nothing ships. Fixing the topic is not enough: the
-    events published meanwhile must be backfilled into the queue."""
-
     family = "fulfillment_wrong_topic"
     spec_number = 4
     category = "config"
@@ -809,15 +771,11 @@ class FulfillmentWrongTopic(Fault):
 
 
 class PaymentsBreakerStuckOpen(Fault):
-    """Spec 9. The provider has elevated (but retryable) errors. payments' circuit breaker
-    was set to open on a single failure and stay open for minutes, so it trips almost
-    immediately and checkout fails fast with 503 although the provider mostly works."""
-
     family = "payments_breaker_stuck_open"
     spec_number = 9
     category = "resilience_config"
     tier = "medium"
-    breaks = ("window",)  # checkouts fail once the first provider error trips the breaker
+    breaks = ("window",)
     settle_s = 15.0
 
     def choose_params(self, rng):
@@ -854,9 +812,6 @@ class PaymentsBreakerStuckOpen(Fault):
         edit_service_config(stack, "payments", payments)
 
     def inject(self, stack):
-        """A short error blip trips the breaker: run customer checkouts until one fails fast
-        with breaker_open (with threshold 1 the first provider error does it). Without this
-        the fault only shows if background traffic happens to hit an error in time."""
         from ..probes import Probe
 
         p = Probe(stack)
@@ -882,7 +837,7 @@ class PaymentsBreakerStuckOpen(Fault):
     def root_cause_fixed(self, stack):
         b = effective_config(stack, "payments")["upstreams"]["provider"].get("breaker")
         if not b:
-            return True  # no breaker at all is a (blunt) valid choice
+            return True
         return int(b.get("failure_threshold", 5)) >= 3 and float(b.get("reset_timeout_s", 5)) <= 60
 
     def solution_steps(self, stack):
@@ -939,18 +894,13 @@ class PaymentsBreakerStuckOpen(Fault):
 
 
 class NotifyDeadLetters(Fault):
-    """Spec 19. The email relay is flaky by nature and notify relies on redelivery. The
-    notify.events queue was changed to max_redeliveries 0, so every relay hiccup sends the
-    event straight to the dead-letter queue and those customers never get their email."""
-
     family = "notify_dead_letters"
     spec_number = 19
     category = "data"
     tier = "medium"
-    breaks = ("liveness",)  # dead-lettered emails for real orders
+    breaks = ("liveness",)
     settle_s = 15.0
 
-    # max_redeliveries is a retry setting as much as a queue setting
     also_accepted_categories = ("resilience_config",)
 
     def choose_params(self, rng):
@@ -1036,10 +986,6 @@ class NotifyDeadLetters(Fault):
 
 
 class SchedulerLockHold(Fault):
-    """Spec 20. The reservation-expiry job was changed to hold its write transaction on
-    inventory.db for seconds every few seconds (a "batch window" setting); inventory's own
-    writes then fail with "database is locked" and checkouts fail intermittently."""
-
     family = "scheduler_lock_hold"
     spec_number = 20
     category = "performance"
@@ -1124,9 +1070,6 @@ class SchedulerLockHold(Fault):
 
 
 class CatalogBadBuildFlag(Fault):
-    """Spec 15. catalog was deployed with build flag search_v2 on; the v2 search query needs
-    a table that only exists from catalog 2.8, so every search returns 500."""
-
     family = "catalog_bad_build_flag"
     spec_number = 15
     category = "bad_deploy"
@@ -1194,10 +1137,6 @@ class CatalogBadBuildFlag(Fault):
 
 
 class FlagsServiceDown(Fault):
-    """Spec 21. A bad edit left etc/feature-flags.yaml unparsable; the flags service crashes
-    on start and keeps restarting. orders, which never got its flags, falls back to its local
-    default checkout_mode=maintenance and rejects every checkout (symptom far from cause)."""
-
     family = "flags_service_down"
     spec_number = 21
     category = "dependency_down"
@@ -1288,14 +1227,10 @@ class FlagsServiceDown(Fault):
         with open(config_path(stack, "feature-flags"), "w") as f:
             yaml.safe_dump(FLAGS, f, sort_keys=False)
         restart_and_wait(stack, "flags")
-        time.sleep(3)  # orders polls flags every 2 s
+        time.sleep(3)
 
 
 class MissingMigration(Fault):
-    """Spec 16. orders was deployed with code that writes the new column orders.channel, but
-    migration 3 was not applied (rolled back by a failed deploy); every checkout fails on
-    insert although orders reports ready."""
-
     family = "missing_migration"
     spec_number = 16
     category = "schema"
@@ -1379,11 +1314,6 @@ def _env_path(stack, service):
 
 
 class FulfillmentEnvTypo(Fault):
-    """Spec 5. A typo in fulfillment's env file (warehouse id variable misspelled) makes it
-    fall back to its unsafe default, dry-run mode: order.paid events are acknowledged but
-    nothing ships. After fixing the variable, the orders acknowledged in dry-run mode must
-    be re-driven."""
-
     family = "fulfillment_env_typo"
     spec_number = 5
     category = "config"
@@ -1475,10 +1405,6 @@ class FulfillmentEnvTypo(Fault):
 
 
 class OrdersConfigDrift(Fault):
-    """Spec 6. orders is running last release's config: its env file still points
-    NW_CONFIG_FILE at the archived config, which calls the decommissioned payments-v1
-    endpoint. Checkout fails; etc/orders.yaml itself looks correct."""
-
     family = "orders_config_drift"
     spec_number = 6
     category = "config"
@@ -1561,10 +1487,6 @@ class OrdersConfigDrift(Fault):
 
 
 class CacheFullNoEviction(Fault):
-    """Spec 13. The cache was given a small memory limit and the noeviction policy. It fills
-    up with catalog entries within seconds; afterwards every write is refused, and auth,
-    which stores login sessions there, rejects every login."""
-
     family = "cache_full_noeviction"
     spec_number = 13
     category = "resource_exhaustion"

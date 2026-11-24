@@ -71,11 +71,16 @@ Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=
 | SFT + GRPO (40 steps, easy train) | held-out test | 160 | 0.0% | 0/20 | 0.024 | 0.08 |
 | SFT | easy train tasks (16) | 256 | 19.9% | 12/16 | 0.334 | 0.64 |
 | SFT + GRPO (40 steps, easy train) | easy train tasks | 256 | 20.7% | 15/16 | 0.390 | 0.74 |
-| SFT + GRPO (all train tiers) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
+| SFT (rerun, same session as next rows) | held-out test | 160 | 0.0% | 0/20 | 0.021 | 0.06 |
+| SFT + GRPO (60 steps, all train tiers) | held-out test | 160 | 0.0% | 0/20 | 0.017 | 0.06 |
+| SFT (rerun, same session) | all train tasks (48) | 144 | 6.2% | 9/48 | 0.172 | 0.43 |
+| SFT + GRPO (60 steps, all train tiers) | all train tasks | 144 | 2.8% | 3/48 | 0.136 | 0.39 |
+| SFT v3 data + GRPO (50 steps, all tiers, matched sampler) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
 
 - The base model solves nothing anywhere. Scripted-oracle SFT gets it to ~20% on the easy training families.
 - GRPO on easy training tasks raised mean reward by +0.056 through better diagnoses (bootstrap over tasks: 95% CI [+0.013, +0.095], p=0.02). Treat this as suggestive only: the 16 tasks are 4 families whose variants share most of their prompt, the gain comes from 2 of the 4 families (exact family-level sign-flip p=0.25), and the SFT row was evaluated in a different Kaggle session. The strict solve rate did not move (+0.008, p=0.88).
-- Nothing transfers to the five held-out families: all three models solve 0/160 and their rewards are not significantly different. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-4%) but blame the wrong service on 56-68% of unseen faults.
+- GRPO on all twelve training families (60 steps, SFT and GRPO evaluated in the same Kaggle session) did not help: mean reward on the 48 training tasks went 0.172 -> 0.136 (-0.036, 95% CI [-0.081, +0.008], p=0.13; by family p=0.27) and solves 6.2% -> 2.8% (p=0.23), and held-out reward did not move (-0.004, p=0.78). The training-batch reward rose from 0.07 (mean of the first 10 steps) to 0.17 (last 10; `results/grpo_v11_curve`), but each step draws different tasks, so that curve is not evidence of learning. Medium and hard faults are rarely solved by the SFT policy (4% of episodes), so most GRPO groups carry little signal. That run also sampled with top_p=1.0 during training and top_p=0.95 at eval; the next run matches them.
+- Nothing transfers to the five held-out families: no trained or untrained model solves a single held-out episode and the trained models' rewards are not significantly different from the base model's. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-6%) but blame the wrong service on 56-69% of unseen faults.
 
 Untrained open models, same evaluator and sampler (one Kaggle session, `results/baseline_*`; 4 samples per test task, 2 per train task over all 48 train tasks):
 
@@ -102,6 +107,9 @@ One outcome per episode (`analysis/taxonomy.py`; figure from `analysis/plots.py`
 | test, base | 0% | 0% | 83.1% | 0% | 13.1% | 2.5% | 1.2% |
 | test, SFT | 0% | 0% | 3.8% | 0.6% | 8.1% | 68.1% | 19.4% |
 | test, GRPO | 0% | 1.9% | 1.9% | 0% | 8.1% | 55.6% | 32.5% |
+| all train, SFT (v11 session) | 6.2% | 2.1% | 5.6% | 2.1% | 34.0% | 30.6% | 19.4% |
+| all train, GRPO 60 steps all tiers | 2.8% | 1.4% | 0% | 0% | 36.1% | 40.3% | 19.4% |
+| test, GRPO 60 steps all tiers | 0% | 0% | 6.2% | 0% | 5.6% | 68.8% | 19.4% |
 
 On trained families the bottleneck is the edit, not the diagnosis: the model finds the right file and key, then writes a `sed` that does not apply (a regex for a key that does not exist, `rps` fixed but `burst` left at 1, a substitution that breaks the YAML), restarts, and submits.
 

@@ -1,11 +1,3 @@
-"""Turn a run's episode trajectories into results/<run>/summary.json (small, committed).
-
-    python eval/summarize.py <trajectory-dir> <run-name> --model M --commit C [--notes ...]
-
-Every reported number must come from such a summary. Runs with different fingerprints are
-not comparable (compare.py refuses).
-"""
-
 import argparse
 import datetime
 import glob

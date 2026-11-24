@@ -1,10 +1,3 @@
-"""Stock levels and reservations with expiry.
-
-Checkout reserves stock (reserved += qty) and the reservation is committed when the
-order.paid event arrives (on_hand -= qty, reserved -= qty). Held reservations past their
-expiry are released by the scheduler. available = on_hand - reserved never goes negative.
-"""
-
 import time
 
 from northwind.lib.broker_client import Consumer
@@ -107,8 +100,6 @@ def main():
         return 200, {"committed": finish(req.params["order_id"], "committed")}
 
     def commit_expired(order_id: str) -> int:
-        """The order was paid after its reservation expired (released stock). Ship anyway:
-        take the stock now. Fails (CHECK on_hand >= 0) if it was sold out meanwhile."""
         now = time.time()
         with db.tx() as c:
             rows = c.execute(

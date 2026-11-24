@@ -1,14 +1,3 @@
-"""The agent loop: the single implementation shared by training (TRL rollout_func) and
-eval (oncallgym.evaluate). It owns turn handling, tool-call parsing and the nudge on
-text-only replies; Episode owns tools, limits and scoring.
-
-    loop = AgentLoop(episode)
-    messages = loop.start()
-    while not loop.done:
-        reply = <model generates an assistant turn given messages>   # raw text
-        env_messages = loop.step(reply)                                # tool results or nudge
-"""
-
 import json
 import re
 
@@ -21,8 +10,6 @@ _THINK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
 def parse_reply(text: str) -> dict:
-    """Split a raw assistant turn (Qwen/Hermes format) into content and tool calls.
-    Malformed calls are kept with an error so the episode can tell the model."""
     text = _THINK.sub("", text or "")
     calls = []
     for raw in _CALL.findall(text):
@@ -66,8 +53,6 @@ class AgentLoop:
         return self.messages
 
     def step(self, reply_text: str) -> list[dict]:
-        """Feed one raw assistant turn; returns the environment messages that follow it
-        (tool results, or a nudge when the reply had no tool call)."""
         parsed = parse_reply(reply_text)
         self.ep.note_model_turn(reply_text)
         self.messages.append(assistant_message(parsed))

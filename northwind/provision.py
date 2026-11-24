@@ -1,13 +1,3 @@
-"""Create one Northwind deployment in a directory: configs (etc/), env files, keys, TLS
-certs, seeded databases (data/), empty logs/. Deterministic for a given seed.
-
-Layout of <home>:
-  etc/<service>.yaml  etc/env/<service>.env  etc/flags.yaml  etc/keys/  etc/tls/
-  data/*.db  data/outbox/  data/seed/manifest.json  logs/  run/
-Verifier-only material (probe user credentials, seed hashes) goes to <private>, which is
-outside <home>.
-"""
-
 import hashlib
 import json
 import os
@@ -129,8 +119,6 @@ STOCK_ON_HAND = 5000
 
 
 def tls_material(cache_dir: str | None = None) -> str:
-    """Self-signed CA + auth server cert, generated once per machine with openssl.
-    Extensions satisfy Python 3.13's VERIFY_X509_STRICT."""
     cache_dir = cache_dir or os.path.join(os.path.expanduser("~"), ".cache", "oncallgym", "tls-v2")
     if os.path.exists(os.path.join(cache_dir, "auth.pem")):
         return cache_dir
@@ -251,7 +239,6 @@ def service_configs(p: dict, seed: int) -> dict[str, dict]:
             defaults={"max_redeliveries": 5, "redelivery_delay_ms": 500, "ordered": False},
             queues={
                 "inventory.order-paid": {},
-                # shipments go out in payment order and an order is never dropped
                 "fulfillment.order-paid": {"ordered": True, "max_redeliveries": -1},
                 "notify.events": {"max_redeliveries": 8},
             },
@@ -464,14 +451,12 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
         with open(os.path.join(home, f"etc/env/{name}.env"), "w") as f:
             f.write(f"NW_ENV=production\nNW_SERVICE={name}\nMALLOC_ARENA_MAX=2\n")
             f.write("".join(f"{k}={v}\n" for k, v in SERVICE_ENV.get(name, {}).items()))
-    # behaviour of third-party systems (not ours to change; hash-protected by the verifier)
     os.makedirs(os.path.join(home, "etc/external"), exist_ok=True)
     with open(os.path.join(home, "etc/external/smtp.yaml"), "w") as f:
         f.write("# external mail relay (third party)\n")
         yaml.safe_dump({"relay": "smtp.mailrelay.example:587", "error_rate": 0.1}, f)
     with open(os.path.join(home, "etc/feature-flags.yaml"), "w") as f:
         yaml.safe_dump(FLAGS, f, sort_keys=False)
-    # deploy tooling keeps the previous release's config for rollbacks
     os.makedirs(os.path.join(home, "etc/archive"), exist_ok=True)
     old_orders = service_configs(p, seed)["orders"]
     old_orders["build"]["version"] = "3.9.2"
@@ -485,7 +470,6 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     with open(os.path.join(home, "etc/topology.json"), "w") as f:
         json.dump(topology_doc(p), f, indent=1)
 
-    # service-to-service token: readable only by the stack owner, never by the agent user
     fd = os.open(os.path.join(home, "run", "internal.token"), os.O_WRONLY | os.O_CREAT, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(os.urandom(16).hex() + "\n")
@@ -495,7 +479,7 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     for fname in ("ca.pem", "auth.pem", "auth.key"):
         shutil.copy(os.path.join(tls, fname), os.path.join(home, "etc/tls", fname))
 
-    seeded_at = 1767225600.0  # fixed (2026-01-01) so seed data is identical for a seed
+    seeded_at = 1767225600.0
     conns = {}
     for dbn in ("users", "catalog", "inventory", "orders", "payments", "provider"):
         c = connect(os.path.join(home, f"data/{dbn}.db"))
@@ -506,7 +490,6 @@ def provision(home: str, private: str, base_port: int, seed: int = 0) -> dict:
     for i in range(1, N_USERS + 1):
         name = f"{rng.choice(FIRST)} {rng.choice(LAST)}"
         email = f"{name.split()[0].lower()}.{i}@example.com"
-        # probe users get unguessable passwords (not derivable from the public seed)
         password = os.urandom(6).hex() if i > N_USERS - N_PROBE_USERS else rng.randbytes(6).hex()
         salt = rng.randbytes(4).hex()
         addr = f"{rng.randint(1, 400)} {rng.choice(STREETS)}, Springfield"

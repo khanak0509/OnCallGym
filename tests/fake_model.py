@@ -1,9 +1,3 @@
-"""Scripted OpenAI-compatible chat server for adapter tests: issues a fixed tool-call
-sequence (one call per turn, by number of tool results seen), then a final text reply.
-
-    python tests/fake_model.py PORT
-"""
-
 import json
 import time
 import uuid

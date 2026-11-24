@@ -1,8 +1,3 @@
-"""Bundle the repo into a Kaggle GPU kernel that runs the vf-run eval.
-
-Usage: python build.py <kaggle-user> <out-dir> [model] [tasks-args] [rollouts]
-"""
-
 import base64
 import io
 import json

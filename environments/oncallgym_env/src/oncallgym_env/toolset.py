@@ -1,6 +1,3 @@
-"""Tool server: lists the core tool schemas and forwards every call to the episode host.
-No tool logic lives here (oncallgym.episode.Tools is the only implementation)."""
-
 from typing import Any, cast
 
 import httpx

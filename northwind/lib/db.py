@@ -1,5 +1,3 @@
-"""SQLite data-access layer: WAL mode, fixed-size connection pool with acquire timeout."""
-
 import contextlib
 import queue
 import sqlite3
@@ -91,7 +89,6 @@ class Pool:
 
     @contextlib.contextmanager
     def tx(self):
-        """Write transaction (BEGIN IMMEDIATE) on a pooled connection."""
         with self.conn() as c:
             c.execute("BEGIN IMMEDIATE")
             try:
@@ -116,7 +113,6 @@ class Pool:
 
 
 def connect(path: str, threads: bool = False) -> sqlite3.Connection:
-    """Single connection (setup scripts, verifier, or a service that serializes with a lock)."""
     c = sqlite3.connect(path, timeout=5.0, isolation_level=None, check_same_thread=not threads)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")

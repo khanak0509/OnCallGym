@@ -1,5 +1,3 @@
-"""Episode core: limits, termination reasons, sandbox permissions. Stack tests are Linux only."""
-
 import platform
 
 import pytest

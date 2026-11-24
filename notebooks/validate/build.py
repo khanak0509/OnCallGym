@@ -1,5 +1,3 @@
-"""Usage: python build.py <kaggle-user> <out-dir> "<validate args>" """
-
 import base64
 import io
 import json

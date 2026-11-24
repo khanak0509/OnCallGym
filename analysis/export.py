@@ -1,13 +1,3 @@
-"""Export an evaluator output dir into a small, committed results/ summary.
-
-    python analysis/export.py <eval_dir> results/<name> --commit <sha> --source "<kernel/run>"
-        [--model-desc "..."]
-
-Writes results/<name>/summary.json: the evaluator's meta.json, provenance, aggregate metrics
-and one row per episode (task, sample, reward components, termination, turns, outcome).
-Full trajectories stay out of git (size); the source field says where they came from.
-"""
-
 import argparse
 import json
 import sys

@@ -1,7 +1,3 @@
-"""Telemetry: scrapes /metrics from every service, ships logs (tails logs/*.log) and keeps
-recent request spans keyed by request id so one request can be followed end to end.
-"""
-
 import glob
 import os
 import re
@@ -29,7 +25,6 @@ def dir_size(path):
 
 
 def p_quantile(buckets: list[tuple[float, float]], q: float):
-    """buckets: [(le, cumulative_count)] sorted by le, last le=inf."""
     if not buckets or buckets[-1][1] <= 0:
         return None
     target = q * buckets[-1][1]
@@ -249,7 +244,6 @@ def main():
 
     @svc.app.route("GET", "/traces")
     def traces(req):
-        """Recent request ids, optionally only those with an error status."""
         only_errors = req.arg("errors") == "1"
         out = []
         with lock:

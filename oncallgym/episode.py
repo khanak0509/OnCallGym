@@ -1,20 +1,3 @@
-"""One OnCallGym episode: the single implementation of tools, limits and the episode loop.
-
-Both adapters (environments/oncallgym for eval, training/trl_env.py for RL) only forward
-calls to Episode; they contain no logic of their own.
-
-    ep = Episode("jwt_key_rotation_mismatch", variant=2, seed=2)
-    messages = ep.start()                       # system + user message
-    out = ep.call_tool("logs", {"service": "orders", "tail": 20})
-    ...
-    breakdown = ep.finish()                     # verifier result, also in ep.trajectory
-    ep.close()
-
-Limits (LIMITS) are defined once here. The token budget is enforced by the episode itself:
-when the next tool output would not fit, the episode ends with termination
-"context_exhausted" (a logged failure, never a crash or a silent 0).
-"""
-
 import hashlib
 import inspect
 import json
@@ -30,22 +13,18 @@ from .stack import Stack, http_json
 from .verifier import VERIFIER_VERSION, Baseline, Breakdown, verify
 
 LIMITS = {
-    "max_output_chars": 2000,  # per tool result
-    "context_tokens": 8192,  # model context cap (Qwen3-1.7B decision)
-    "reserve_tokens": 512,  # kept free for the model's next turn
-    # neither adapter sees the model's text before the tool runs, so each tool call is also
-    # charged a fixed allowance for the assistant turn that produced it (same in both paths)
+    "max_output_chars": 2000,
+    "context_tokens": 8192,
+    "reserve_tokens": 512,
     "model_tokens_per_turn": 160,
     "exec_timeout_s": 10,
     "logs_max_tail": 50,
     "line_max_chars": 240,
 }
-# no_submission: the agent stopped (text reply) before using all turns, without submitting
 TERMINATIONS = ("submitted", "turn_limit", "context_exhausted", "no_submission", "error")
 
 
 def approx_tokens(text: str) -> int:
-    """Fallback token estimate (about 3.5 chars per token for logs and JSON)."""
     return max(1, int(len(text) / 3.5))
 
 
@@ -61,17 +40,10 @@ class EpisodeOver(Exception):
 
 
 class Tools:
-    """The agent's tools. Docstrings are the tool schemas shown to the model."""
-
     def __init__(self, ep: "Episode"):
         self._ep = ep
 
     def topology(self) -> str:
-        """Show the services, what each one depends on, and their ports.
-
-        Returns:
-            One line per service: name, port, role, dependencies.
-        """
         from northwind.topology import SERVICES
 
         ports = self._ep.stack.ports
@@ -83,11 +55,6 @@ class Tools:
         return "\n".join(lines)
 
     def list_services(self) -> str:
-        """List every service with its state, readiness, restart count and memory.
-
-        Returns:
-            A table with one row per service.
-        """
         rows = ["service      state    ready restarts oom rss_mb  not_ready_reason"]
         for s in self._ep.stack.services():
             reason = "; ".join(s["not_ready_reasons"] or [])[:80] if not s["ready"] else ""
@@ -98,17 +65,6 @@ class Tools:
         return "\n".join(rows)
 
     def exec(self, command: str) -> str:
-        """Run a shell command in the deployment directory (etc/, logs/, data/).
-
-        Use it to read and edit config files or call service HTTP APIs with curl.
-        Output is truncated; commands time out after a few seconds.
-
-        Args:
-            command: The shell command to run.
-
-        Returns:
-            Exit code and combined stdout/stderr.
-        """
         r = sandbox.run(
             self._ep.agent_user,
             command,
@@ -119,16 +75,6 @@ class Tools:
         return f"[{status}]\n{r['output']}"
 
     def logs(self, service: str, tail: int = 20, grep: str = "") -> str:
-        """Show recent log lines of one service.
-
-        Args:
-            service: Service name, e.g. "orders".
-            tail: Number of most recent matching lines to show (max 50).
-            grep: Optional text; only lines containing it (case-insensitive) are shown.
-
-        Returns:
-            Matching log lines, oldest first.
-        """
         from northwind.topology import SERVICES
 
         if service not in SERVICES and service != "supervisor":
@@ -143,26 +89,14 @@ class Tools:
         except OSError:
             return f"no log file for {service}"
         if grep:
-            # plain case-insensitive substring (no regex: a pathological pattern must not
-            # hang the episode)
             needle = str(grep)[:200].lower()
             lines = [ln for ln in lines if needle in ln.lower()]
         else:
-            # access lines dominate; drop the successful ones unless asked for
             lines = [ln for ln in lines if "type=access" not in ln or " status=2" not in ln]
         lines = [ln[: LIMITS["line_max_chars"]] for ln in lines[-tail:]]
         return "\n".join(lines) or "(no matching lines)"
 
     def metrics(self, service: str = "") -> str:
-        """Show metrics from telemetry over the last 30 seconds.
-
-        Args:
-            service: Optional service name. Without it, a one-line summary per service.
-
-        Returns:
-            Error rate, p95 latency, request rate, memory, and where relevant circuit
-            breakers, connection pools, queue depths / dead letters, cache usage.
-        """
         port = self._ep.stack.ports["telemetry"]
         if service:
             st, body = http_json(port, "GET", f"/services/{service}")
@@ -186,16 +120,6 @@ class Tools:
         return "\n".join(rows)
 
     def trace(self, request_id: str) -> str:
-        """Follow one request through every service it touched.
-
-        Args:
-            request_id: A request id (req=... in logs). Use "recent_errors" to list recent
-                failed requests.
-
-        Returns:
-            The hops of the request with status and duration, plus warnings/errors logged
-            for it.
-        """
         port = self._ep.stack.ports["telemetry"]
         if request_id == "recent_errors":
             st, body = http_json(port, "GET", "/traces?errors=1&limit=8")
@@ -220,14 +144,6 @@ class Tools:
         return "\n".join(lines)
 
     def restart(self, service: str) -> str:
-        """Restart one service (it re-reads its config and env file).
-
-        Args:
-            service: Service name, e.g. "orders".
-
-        Returns:
-            Whether the service came back ready.
-        """
         from northwind.topology import SERVICES
 
         if service not in SERVICES:
@@ -245,16 +161,6 @@ class Tools:
         return f"{service} restarted but NOT ready after 15s: {reasons}"
 
     def submit_diagnosis(self, root_cause_category: str, component: str, summary: str) -> str:
-        """Submit your diagnosis. This ends the episode; call it once, after fixing.
-
-        Args:
-            root_cause_category: One of the root cause categories listed in the instructions.
-            component: The service where the root cause lives.
-            summary: One or two sentences on what was wrong and what you changed.
-
-        Returns:
-            Confirmation that the episode ended.
-        """
         self._ep._diagnosis = {
             "root_cause_category": root_cause_category,
             "component": component,
@@ -265,6 +171,96 @@ class Tools:
         return "diagnosis submitted" + ("" if valid else " (unknown category)")
 
 
+TOOL_DOCS = {
+    "topology": (
+        "Show the services, what each one depends on, and their ports.\n"
+        "\n"
+        "        Returns:\n"
+        "            One line per service: name, port, role, dependencies.\n"
+        "        "
+    ),
+    "list_services": (
+        "List every service with its state, readiness, restart count and memory.\n"
+        "\n"
+        "        Returns:\n"
+        "            A table with one row per service.\n"
+        "        "
+    ),
+    "exec": (
+        "Run a shell command in the deployment directory (etc/, logs/, data/).\n"
+        "\n"
+        "        Use it to read and edit config files or call service HTTP APIs with curl.\n"
+        "        Output is truncated; commands time out after a few seconds.\n"
+        "\n"
+        "        Args:\n"
+        "            command: The shell command to run.\n"
+        "\n"
+        "        Returns:\n"
+        "            Exit code and combined stdout/stderr.\n"
+        "        "
+    ),
+    "logs": (
+        "Show recent log lines of one service.\n"
+        "\n"
+        "        Args:\n"
+        '            service: Service name, e.g. "orders".\n'
+        "            tail: Number of most recent matching lines to show (max 50).\n"
+        "            grep: Optional text; only lines containing it (case-insensitive) are shown.\n"
+        "\n"
+        "        Returns:\n"
+        "            Matching log lines, oldest first.\n"
+        "        "
+    ),
+    "metrics": (
+        "Show metrics from telemetry over the last 30 seconds.\n"
+        "\n"
+        "        Args:\n"
+        "            service: Optional service name. Without it, a one-line summary per service.\n"
+        "\n"
+        "        Returns:\n"
+        "            Error rate, p95 latency, request rate, memory, and where relevant circuit\n"
+        "            breakers, connection pools, queue depths / dead letters, cache usage.\n"
+        "        "
+    ),
+    "trace": (
+        "Follow one request through every service it touched.\n"
+        "\n"
+        "        Args:\n"
+        '            request_id: A request id (req=... in logs). Use "recent_errors" to '
+        "list recent\n"
+        "                failed requests.\n"
+        "\n"
+        "        Returns:\n"
+        "            The hops of the request with status and duration, plus "
+        "warnings/errors logged\n"
+        "            for it.\n"
+        "        "
+    ),
+    "restart": (
+        "Restart one service (it re-reads its config and env file).\n"
+        "\n"
+        "        Args:\n"
+        '            service: Service name, e.g. "orders".\n'
+        "\n"
+        "        Returns:\n"
+        "            Whether the service came back ready.\n"
+        "        "
+    ),
+    "submit_diagnosis": (
+        "Submit your diagnosis. This ends the episode; call it once, after fixing.\n"
+        "\n"
+        "        Args:\n"
+        "            root_cause_category: One of the root cause categories listed in the "
+        "instructions.\n"
+        "            component: The service where the root cause lives.\n"
+        "            summary: One or two sentences on what was wrong and what you changed.\n"
+        "\n"
+        "        Returns:\n"
+        "            Confirmation that the episode ended.\n"
+        "        "
+    ),
+}
+
 TOOL_NAMES = [n for n, f in inspect.getmembers(Tools, inspect.isfunction) if not n.startswith("_")]
 
 
@@ -274,12 +270,11 @@ def tool_schemas_fingerprint() -> str:
         f = getattr(Tools, n)
         h.update(n.encode())
         h.update(str(inspect.signature(f)).encode())
-        h.update((f.__doc__ or "").encode())
+        h.update(TOOL_DOCS.get(n, "").encode())
     return h.hexdigest()[:16]
 
 
 def fingerprint() -> str:
-    """Identity of everything that affects scores; written into every results run."""
     h = hashlib.sha256()
     h.update(system_prompt().encode())
     h.update(tool_schemas_fingerprint().encode())
@@ -299,8 +294,6 @@ class Episode:
     ):
         self.fault = make_fault(family, variant)
         self.seed = variant if seed is None else seed
-        # the budget always uses the same estimator so training and eval end episodes at
-        # the same point; count_tokens is accepted for logging only
         self.count_tokens = approx_tokens
         self.real_count_tokens = count_tokens
         self.stack = Stack(seed=self.seed, root=root)
@@ -315,7 +308,6 @@ class Episode:
         self.trajectory: list[dict] = []
         self.started_at = None
 
-    # lifecycle
     def start(self) -> list[dict]:
         self.started_at = time.time()
         self.stack.create()
@@ -333,7 +325,6 @@ class Episode:
             {"role": "system", "content": system_prompt()},
             {"role": "user", "content": task_prompt(self.fault.alert(), self.turn_limit)},
         ]
-        # the chat template also renders the tool schemas into the prompt
         self.tokens_used = sum(self.count_tokens(m["content"]) for m in msgs) + self.count_tokens(
             json.dumps(tool_schemas())
         )
@@ -345,15 +336,11 @@ class Episode:
         return self.termination is not None
 
     def note_model_turn(self, text: str):
-        """The agent loop reports each model turn: its real size is charged to the budget
-        (then the fixed per-call allowance is not added on top)."""
         self._sees_model_text = True
         self.tokens_used += self.count_tokens(text)
         self._log("model", text=text)
 
     def nudge(self) -> str:
-        """The model replied without calling a tool: tell it to continue. Counts as a turn
-        and is charged to the budget, exactly like a tool call."""
         from .loop import NUDGE
 
         if self.done:
@@ -365,7 +352,7 @@ class Episode:
         args = args or {}
         if self.done:
             return f"episode is over ({self.termination})"
-        self.turns += 1  # invalid calls count too, so they cannot be spammed for free
+        self.turns += 1
         if name == "__invalid__":
             out = (
                 f"{args.get('error', 'invalid tool call')}. Write calls as <tool_call>"
@@ -378,7 +365,7 @@ class Episode:
                 out = getattr(self.tools, name)(**args)
             except TypeError as e:
                 out = f"bad arguments for {name}: {e}"
-            except Exception as e:  # a tool must never crash the episode
+            except Exception as e:
                 out = f"tool error: {type(e).__name__}: {e}"[:300]
         return self._deliver(name, args, out)
 
@@ -456,13 +443,10 @@ _PY_TO_JSON = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 
 def tool_schemas() -> list[dict]:
-    """OpenAI-style function schemas built from the Tools signatures and docstrings. The
-    eval adapter serves exactly these; the training adapter's schemas are checked against
-    them in the parity test."""
     out = []
     for name in TOOL_NAMES:
         fn = getattr(Tools, name)
-        doc = inspect.getdoc(fn) or ""
+        doc = inspect.cleandoc(TOOL_DOCS.get(name, ""))
         desc = doc.split("\n\n")[0].replace("\n", " ").strip()
         arg_docs, current = {}, None
         in_args = False

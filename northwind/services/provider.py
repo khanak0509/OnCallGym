@@ -1,9 +1,3 @@
-"""Simulated third-party payment provider (outside Northwind's control).
-
-Supports Idempotency-Key like real card processors: a repeated key returns the original
-charge instead of charging again. Latency and error behaviour come from etc/provider.yaml.
-"""
-
 import random
 import secrets
 import sqlite3

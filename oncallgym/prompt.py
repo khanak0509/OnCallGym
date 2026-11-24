@@ -1,5 +1,3 @@
-"""System prompt and task prompt. Shared by the eval (verifiers) and training (TRL) paths."""
-
 from .faults import CATEGORIES
 
 SYSTEM_PROMPT = """You are the on-call engineer for Northwind Commerce, an online shop made of \

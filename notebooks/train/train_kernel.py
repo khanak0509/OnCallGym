@@ -1,9 +1,3 @@
-"""Kaggle T4x2 training kernel: SFT warm start (GPU 0), then GRPO with real OnCallGym
-episodes (trainer GPU 0, vLLM server GPU 1). Built by build.py with the code, the SFT data
-and the run settings filled in. Everything it produces lands in /kaggle/working:
-train_summary.json, sft/ (adapter + log), grpo/ (adapter, checkpoints, train_log.jsonl).
-"""
-
 import base64
 import gzip
 import io
@@ -32,8 +26,6 @@ def save():
 
 
 def sh(cmd, log, timeout=7200, env=None):
-    """Run cmd in its own process group; on timeout kill the whole group (trainer,
-    evaluator and the episode stacks they started), then re-raise TimeoutExpired."""
     t0 = time.time()
     with open(WORK / log, "w") as f:
         p = subprocess.Popen(
@@ -81,7 +73,6 @@ def wait_up(port, proc, tries=240):
 
 
 def find_adapter(path):
-    """A LoRA adapter dir; for a dataset mount, search under it by the dataset's slug."""
     if Path(path, "adapter_config.json").exists():
         return path
     slug = Path(path).name
@@ -92,9 +83,6 @@ def find_adapter(path):
 
 
 def serve_and_eval(model, adapters, evals, py, env, prefix, tp=1, base=True):
-    """Serve `model` with vLLM (optionally with LoRA adapters) and run the shared-loop
-    evaluator for every eval config on every adapter (and the base model if `base`).
-    Results land in WORK/{prefix}_{eval name}_{tag}; returns their meta.json contents."""
     log = open(WORK / f"vllm_{prefix}.log", "w")
     cmd = [
         f"{VENV}/bin/vllm",
@@ -156,9 +144,6 @@ def serve_and_eval(model, adapters, evals, py, env, prefix, tp=1, base=True):
 
 
 def run_gate(s, gate, py, env, adapters, prefix="gate"):
-    """As the gate, GRPO only starts if the SFT solve rate is within the band; after GRPO
-    the same helper gives the before/after comparison. `gate` is one eval config, or has
-    "evals": a list of them."""
     evals = gate.get("evals") or [gate]
     out = serve_and_eval(s["model"], adapters, evals, py, env, prefix, base=gate.get("base", True))
     first = evals[0].get("name")
@@ -169,7 +154,6 @@ def run_gate(s, gate, py, env, adapters, prefix="gate"):
 
 
 def run_baselines(bl, py, env):
-    """Open models of several sizes, no adapters, same evaluator and settings."""
     res = {}
     for m in bl["models"]:
         tag = m["model"].split("/")[-1].lower()
@@ -303,7 +287,6 @@ def main():
     save()
     post = s.get("post_eval")
     grpo_adapter = latest_adapter(f"{WORK}/{runs[-1]['name']}")
-    # label what is evaluated: the final adapter only if GRPO finished (rc 0)
     summary["grpo_adapter"] = {"path": grpo_adapter, "grpo_rc": rc}
     if post and grpo_adapter:
         adapters = {"grpo": grpo_adapter}

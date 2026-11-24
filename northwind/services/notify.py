@@ -1,8 +1,3 @@
-"""Consumes order events and writes customer "emails" to data/outbox/emails.jsonl.
-
-Delivery is at-least-once, so the consumer de-duplicates by (topic, order_id).
-"""
-
 import json
 import os
 import random
@@ -44,7 +39,6 @@ def main():
     def handle(msg):
         p = msg["payload"]
         if rng.random() < relay_error_rate:
-            # the external mail relay is flaky; the broker redelivers and we retry
             raise ConnectionError("smtp relay: 421 service not available, try again later")
         key = (msg["topic"], p["order_id"])
         with lock:

@@ -1,6 +1,3 @@
-"""rollout_func contract with TRL 1.18: prompts arrive already repeated num_generations
-times (RepeatSampler); one completion per received prompt, same task within a group."""
-
 import json
 
 from training.rollout import make_rollout_func

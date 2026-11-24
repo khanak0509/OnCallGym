@@ -1,12 +1,3 @@
-"""logfmt logger writing to <home>/logs/<service>.log.
-
-Lines look like:
-  ts=2026-11-17T10:00:00.123Z level=info svc=orders req=3f2a msg="checkout ok" order=118 dur_ms=41
-
-The file is reopened when it was rotated or deleted (the scheduler rotates logs), like
-logging.handlers.WatchedFileHandler.
-"""
-
 import os
 import sys
 import threading
@@ -41,7 +32,6 @@ def format_line(level: str, svc: str, msg: str, fields: dict) -> str:
 
 
 def parse_line(line: str) -> dict:
-    """Parse one logfmt line back into a dict (used by telemetry and probes)."""
     out = {}
     i, n = 0, len(line)
     while i < n:
@@ -115,7 +105,6 @@ class Logger:
                 self._maybe_reopen()
                 self._fh.write(line + "\n")
             except OSError:
-                # disk full / quota: real services keep serving and lose log lines
                 self.write_errors += 1
                 self._fh = None
 

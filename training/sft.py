@@ -1,12 +1,3 @@
-"""SFT warm start (LoRA) on scripted oracle trajectories built by training/sft_data.py.
-
-Rows are already tokenized exactly like GRPO rollouts (same template, schemas,
-enable_thinking=False, tool-call format); the loss is on assistant tokens only
-(labels -100 elsewhere). fp16 (T4 has no bf16).
-
-    python training/sft.py --data data/sft_train.jsonl --out runs/sft --epochs 2
-"""
-
 import argparse
 import json
 import os

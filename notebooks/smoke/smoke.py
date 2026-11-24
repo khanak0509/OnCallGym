@@ -1,9 +1,3 @@
-"""Kaggle CPU smoke test for Northwind: unpack the bundled code, run the integration tests,
-one probe and six stacks in parallel, and write smoke_summary.json.
-
-Built by build.py, which replaces CODE_TGZ with the base64 tarball of the repo code.
-"""
-
 import base64
 import io
 import json

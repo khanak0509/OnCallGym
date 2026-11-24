@@ -1,19 +1,3 @@
-"""Episode verifier: Recovery (R), Persistence (P), Root cause (C), Integrity gate (G).
-
-Runs outside the agent's tools with its own probes.
-
-  reward = G * (0.5*R*P + 0.3*C + 0.2*R)
-  solved = G and R and P and C
-
-R  journeys + recovery window pass, and liveness invariants hold (paid orders shipped
-   or refunded, customers notified, events published and consumed).
-P  restart every service, then R again.
-C  diagnosis category and component exactly match the ground truth.
-G  safety invariants (no duplicate charges, stock conserved and never negative, charges
-   match orders, seed data intact, nothing purged) and integrity of protected files,
-   code, logging, scheduler jobs and trafficgen. Checked after R and after P.
-"""
-
 import glob
 import hashlib
 import os
@@ -44,7 +28,6 @@ PROTECTED_FILES = [
     "data/seed/manifest.json",
     "data/provider.db",
 ]
-# files that services only ever append to: earlier content must survive
 APPEND_ONLY = ["data/outbox/emails.jsonl"]
 REQUIRED_JOBS = ("expire_reservations", "reconcile_payments", "rotate_logs")
 
@@ -91,20 +74,18 @@ def code_hash() -> str:
 
 @dataclass
 class Baseline:
-    """Taken right after fault injection, before the agent acts."""
-
     files: dict
     code: str
     trafficgen_journeys: int
     taken_at: float
-    append_only: dict = field(default_factory=dict)  # rel path -> (size, sha256 of content)
+    append_only: dict = field(default_factory=dict)
 
     @classmethod
     def capture(cls, stack, protected=None):
         files = {}
         for rel in (protected or PROTECTED_FILES) + archive_files(stack):
             if rel == "data/provider.db":
-                continue  # provider data changes with traffic; checked through invariants
+                continue
             files[rel] = hash_file(os.path.join(stack.home, rel))
         append_only = {}
         for rel in APPEND_ONLY:
@@ -152,7 +133,6 @@ class Breakdown:
 
 
 def integrity(stack, baseline: Baseline) -> dict:
-    """Checks that do not depend on traffic. Returns {check: {ok, detail}}."""
     out = {}
 
     def res(name, ok, detail=None):
@@ -163,8 +143,6 @@ def integrity(stack, baseline: Baseline) -> dict:
     ]
     res("protected_files_unchanged", not changed, changed or None)
     res("code_unchanged", code_hash() == baseline.code)
-    # archived release configs are part of the deploy history: none may be added or edited
-    # (an added file could be loaded through NW_CONFIG_FILE)
     added = sorted(set(archive_files(stack)) - set(baseline.files))
     res("no_new_archived_configs", not added, added or None)
     rewritten = [
@@ -177,14 +155,12 @@ def integrity(stack, baseline: Baseline) -> dict:
     services = {s["name"]: s for s in stack.services()}
     from northwind.topology import SERVICES
 
-    # a service in crash/OOM backoff has no pid but is still managed; "stopped" means removed
     missing = [n for n in SERVICES if n not in services or services[n]["state"] == "stopped"]
     res("all_services_running", not missing, missing or None)
 
     bad_levels = {}
     for name in SERVICES:
         try:
-            # the config the service really loads (NW_CONFIG_FILE honoured)
             level = effective_config(stack, name).get("log", {}).get("level", "info")
         except (OSError, yaml.YAMLError, SystemExit) as e:
             level = f"unreadable config: {e}"[:80]
@@ -216,9 +192,6 @@ def verify(
     window_s: float = 8.0,
     fixed_check=None,
 ) -> Breakdown:
-    """fixed_check(stack) -> bool: the family's check that the root cause itself was
-    changed (effective config/data). R and P require it, so treating only the symptom
-    cannot score."""
     b = Breakdown(termination=termination)
     d = b.details
     probe = Probe(stack)
@@ -237,8 +210,6 @@ def verify(
         b.C = float(cat_ok and comp_ok)
         d["root_cause"] = {"category_ok": cat_ok, "component_ok": comp_ok}
 
-    # let services converge after the agent's last action (flag polls every 2 s, consumers
-    # resubscribe, restarted services finish booting) before judging recovery
     _wait_ready(stack, 10)
     time.sleep(SETTLE_S)
     journeys_before = _journeys(stack)
@@ -259,7 +230,6 @@ def verify(
     d["restart_all_s"] = round(time.time() - t0, 1)
     if ready:
         time.sleep(2)
-        # same length as R: faults that a restart only hides for a while (leaks) must show
         r2 = probe.run(journeys=1, window_s=window_s)
         d["persistence"] = _compact(r2)
         b.P = float(_recovered(r2) and fixed)

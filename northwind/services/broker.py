@@ -1,13 +1,3 @@
-"""Message broker: topics fan out to bound queues; consumers pull with a visibility timeout,
-then ack or nack. Failed deliveries are retried up to max_redeliveries, then moved to the
-queue's dead-letter list. Everything is persisted in data/broker.db.
-
-etc/broker.yaml:
-  defaults: {max_redeliveries: 5, redelivery_delay_ms: 500, ordered: false}
-  queues: {fulfillment.order-paid: {max_redeliveries: 5}}
-  bindings: [{queue: notify.events, topic: order.paid}]   # static bindings (optional)
-"""
-
 import contextlib
 import json
 import secrets
@@ -59,8 +49,6 @@ def main():
 
     @contextlib.contextmanager
     def tx():
-        """Write transaction on the shared connection; rolled back on any error so a failed
-        write (e.g. disk full) never leaves the connection stuck inside a transaction."""
         with lock:
             db.execute("BEGIN IMMEDIATE")
             try:
@@ -74,7 +62,6 @@ def main():
         return (qcfg.get(queue) or {}).get(key, defaults[key])
 
     def max_deliveries(queue):
-        """None means unlimited (max_redeliveries < 0)."""
         m = int(qsetting(queue, "max_redeliveries"))
         return None if m < 0 else m + 1
 
@@ -126,8 +113,6 @@ def main():
 
     @svc.app.route("POST", "/subscribe", internal=True)
     def subscribe(req):
-        """Declare a queue's subscriptions: the queue is bound to exactly `topics`
-        (bindings to other topics are removed). Changes are recorded in binding_log."""
         b = req.json
         topics = b.get("topics") or ([b["topic"]] if b.get("topic") else [])
         require(b.get("queue") and topics, 400, "queue and topics required")
@@ -152,8 +137,6 @@ def main():
 
     @svc.app.route("POST", "/queues/{queue}/backfill")
     def backfill(req):
-        """Copy already-published messages of `topic` (newer than since_s seconds ago) into
-        the queue if they are not in it yet, e.g. after fixing a wrong subscription."""
         q = req.params["queue"]
         topic = req.json.get("topic")
         require(topic, 400, "topic required")
@@ -188,8 +171,6 @@ def main():
         )
         with tx():
             if ordered:
-                # strict FIFO: only the head of the queue may be delivered, and only when
-                # it is visible (not in flight, not waiting for its redelivery delay)
                 rows = db.execute(select + "ORDER BY e.msg_id LIMIT 1", (queue,)).fetchall()
                 rows = [r for r in rows if r["visible_at"] <= now]
             else:
@@ -324,7 +305,6 @@ def main():
 
     @svc.app.route("GET", "/queues/{queue}/messages")
     def head(req):
-        """Messages waiting in a queue (ready or in flight), oldest first."""
         with lock:
             rows = db.execute(
                 "SELECT e.msg_id AS id, e.state, e.deliveries, e.last_error, m.topic, m.payload "

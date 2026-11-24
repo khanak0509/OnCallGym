@@ -1,5 +1,3 @@
-"""Usage: python build.py <kaggle-user> <out-dir> <sft-data.jsonl> '<settings json>'"""
-
 import base64
 import gzip
 import io

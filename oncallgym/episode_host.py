@@ -1,13 +1,3 @@
-"""Run one Episode in its own process and serve it over local HTTP (episode_server).
-
-    python -m oncallgym.episode_host --family F --variant V --seed S --ready-file PATH
-
-Started by an adapter (e.g. verifiers' runtime.run_background). The host writes
-{"url": ...} to --ready-file once the stack is up and the fault injected. On SIGTERM
-(adapter teardown) or when its parent dies, it tears the stack down, so cleanup does not
-depend on the adapter's own hooks running.
-"""
-
 import argparse
 import json
 import os
@@ -20,8 +10,6 @@ from .episode_server import EpisodeServer
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    # task parameters come in a private file, not on the command line (which every local
-    # user, including the agent, can read in /proc)
     ap.add_argument("--task-file", required=True)
     ap.add_argument("--ready-file", required=True)
     ap.add_argument("--trajectory-file", default=None)
@@ -59,7 +47,6 @@ def main(argv=None):
             json.dump({"error": f"{type(e).__name__}: {e}"[:500]}, f)
     finally:
         if args.trajectory_file:
-            # contains the ground truth: private to the evaluator
             os.makedirs(os.path.dirname(args.trajectory_file) or ".", mode=0o700, exist_ok=True)
             fd = os.open(args.trajectory_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:

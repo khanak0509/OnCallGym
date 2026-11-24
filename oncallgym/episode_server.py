@@ -1,12 +1,3 @@
-"""Expose one Episode over local HTTP so tool code in another process (verifiers runs each
-toolset as its own process) calls the same Episode object. No logic lives here.
-
-  POST /call    {"name": ..., "args": {...}}  -> {"output": str, "done": bool}
-  POST /model   {"text": ...}                 -> {}   (count a model turn in the budget)
-  POST /finish                                -> breakdown dict
-  GET  /state                                 -> {"done", "termination", "turns", "tokens_used"}
-"""
-
 import hmac
 import json
 import os
@@ -19,10 +10,8 @@ from .episode import Episode
 class EpisodeServer:
     def __init__(self, episode: Episode):
         self.ep = episode
-        # every request must carry this token (other local processes, e.g. something the
-        # agent started, cannot drive the episode)
         self.token = os.urandom(16).hex()
-        self.lock = threading.Lock()  # tool calls of one episode are sequential
+        self.lock = threading.Lock()
         server = self
 
         class H(BaseHTTPRequestHandler):

@@ -1,8 +1,3 @@
-"""Verifier probes for one stack: end-to-end user journeys through the edge, a recovery
-window (readiness, error rate, latency), and business invariants read straight from the
-databases. Nothing here goes through the agent's tools.
-"""
-
 import http.client
 import json
 import os
@@ -20,8 +15,6 @@ EXPECTED_QUEUES = {
     "order.shipped": ["notify.events"],
 }
 
-# invariants that describe the system catching up (part of Recovery); all others are
-# safety invariants (part of the integrity gate)
 LIVENESS_INVARIANTS = {
     "paid_orders_fulfilled_or_refunded",
     "charged_failed_orders_refunded",
@@ -39,8 +32,6 @@ THRESHOLDS = {
 
 
 def _ro(path):
-    """Read-only connection holding one read transaction (a consistent snapshot) from its
-    first query until it is closed."""
     c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5, isolation_level=None)
     c.row_factory = sqlite3.Row
     c.execute("BEGIN")
@@ -106,7 +97,6 @@ class Probe:
         return out
 
     def journey(self) -> dict:
-        """login -> browse -> search -> checkout -> fulfilled -> notified."""
         user = self.rng.choice(self.secret["probe_users"])
         sku = self.rng.choice(self.secret["skus"])
         steps = []
@@ -181,10 +171,6 @@ class Probe:
         return res
 
     def recovery_window(self, seconds: float = 10.0, interval: float = 0.5) -> dict:
-        """For `seconds`: all services ready (supervisor view), reads through the edge
-        (catalog list, product, search) and a login + checkout every few ticks.
-        Pass if never not-ready, read error rate and p95 under thresholds, and every
-        checkout succeeded within the checkout timeout."""
         lat, errors, total, not_ready = [], 0, 0, {}
         checkouts = {"ok": 0, "failed": 0, "max_ms": 0.0}
         user = self.rng.choice(self.secret["probe_users"])
@@ -261,8 +247,6 @@ class Probe:
         def res(name, ok, detail=None):
             out[name] = {"ok": bool(ok), **({"detail": detail} if detail else {})}
 
-        # snapshot order matters with live traffic: orders first, then the databases that
-        # are written after an order row exists (charges, events, stock commits)
         t_orders = time.time()
         orders = _ro(f"{h}/data/orders.db")
         inv = _ro(f"{h}/data/inventory.db")
@@ -316,7 +300,6 @@ class Probe:
                     )
             res("stock_conserved", not bad, bad[:5])
 
-            # every paid order: exactly one succeeded provider charge for its total
             charges = {}
             created = {}
             for r in prov.execute(
@@ -338,7 +321,6 @@ class Probe:
                 ):
                     unrefunded.append({"order": o["id"], "status": o["status"], "charges": ch})
             known = {r[0] for r in orders.execute("SELECT id FROM orders")}
-            # charges newer than the orders snapshot may belong to orders it cannot see yet
             orphan = [ref for ref in charges if ref not in known and created[ref] < t_orders - 1.0]
             res(
                 "charges_match_orders",
@@ -349,7 +331,6 @@ class Probe:
                 "SELECT COUNT(*) FROM order_items i LEFT JOIN orders o ON o.id=i.order_id "
                 "WHERE o.id IS NULL"
             ).fetchone()[0]
-            # reservations newer than the orders snapshot may belong to unseen orders
             old_res = {
                 r[0]
                 for r in inv.execute(
@@ -409,12 +390,7 @@ class Probe:
                 r[0]: r[1]
                 for r in broker.execute("SELECT topic, COUNT(*) FROM messages GROUP BY topic")
             }
-            # a message is valid if it refers to an order that exists; malformed messages
-            # (poison) may be dead-lettered or dropped without counting as lost
             order_ids = {r[0] for r in orders.execute("SELECT id FROM orders")}
-            # which queues a message was routed to is decided by the bindings at publish
-            # time (binding_log), so a message published while a queue was unbound is not
-            # "lost" from it (that shows up as liveness: orders not shipped)
             changes = {}
             for r in broker.execute("SELECT queue, topic, action, ts FROM binding_log ORDER BY id"):
                 changes.setdefault(r["topic"], []).append((r["ts"], r["queue"], r["action"]))
@@ -487,8 +463,6 @@ class Probe:
                         except ValueError:
                             continue
                         emails.setdefault(e.get("order_id"), set()).add(e.get("template"))
-            # every event notify acknowledged must have produced its email (safety: catches
-            # a rewritten or truncated outbox regardless of timing)
             acked_notify = set()
             for r in broker.execute(
                 "SELECT m.payload, m.topic FROM entries e JOIN messages m ON m.id=e.msg_id "

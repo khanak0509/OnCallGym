@@ -1,18 +1,3 @@
-"""Per-deployment process supervisor.
-
-Starts services layer by layer (waiting for readiness between layers), restarts crashed
-services with exponential backoff, kills services whose RSS exceeds their memory limit
-(logged like a kernel OOM kill), and exposes a small control API:
-
-  GET  /services                 status of every service
-  POST /services/{name}/restart  stop + start one service (re-reads its config and env file)
-  POST /restart-all
-  POST /shutdown
-
-All services run in the supervisor's process group, so killing the group removes
-everything. The supervisor exits if its parent dies; services exit if the supervisor dies.
-"""
-
 import argparse
 import http.client
 import json
@@ -49,8 +34,6 @@ ENV_DENY = {
 
 
 def safe_env(values: dict) -> dict:
-    """Env files are editable by the agent: accept only plain application variables,
-    never anything that changes how the interpreter or the loader behaves."""
     out = {}
     for k, v in values.items():
         if not ENV_KEY.match(k) or k in ENV_DENY or k.startswith(ENV_DENY_PREFIXES):
@@ -99,7 +82,7 @@ class Proc:
         self.port = int(cfg["port"])
         self.memory_limit = int(cfg.get("memory_limit_mb", 150)) * 1_000_000
         self.popen: subprocess.Popen | None = None
-        self.state = "stopped"  # starting, running, backoff, stopped
+        self.state = "stopped"
         self.restarts = 0
         self.oom_kills = 0
         self.last_exit = None
@@ -131,17 +114,13 @@ class Supervisor:
         self.booted = False
         self.boot_seconds = None
 
-    # process control
     def spawn(self, p: Proc):
-        # services get a minimal environment: never the parent's tokens or credentials
         env = {k: os.environ[k] for k in ENV_ALLOWLIST if k in os.environ}
         env.update(safe_env(read_env_file(os.path.join(self.home, f"etc/env/{p.name}.env"))))
         env["NW_HOME"] = self.home
         env["NW_SUPERVISOR_PID"] = str(os.getpid())
         env["PYTHONUNBUFFERED"] = "1"
         out = open(os.path.join(self.home, f"logs/{p.name}.stdout"), "ab")
-        # -I: ignore PYTHON* env vars, user site and the cwd, so nothing in the episode
-        # directory (which the agent can edit) can inject code; code path set explicitly
         boot = (
             f"import sys; sys.path.insert(0, {CODE_ROOT!r}); import runpy; "
             f"runpy.run_module('northwind.services.{p.name}', run_name='__main__')"
@@ -260,7 +239,7 @@ class Supervisor:
                     self.check_ready(p)
                     with self.lock:
                         if p.popen is not pop:
-                            continue  # restarted meanwhile; next round checks the new one
+                            continue
                         if p.ready:
                             p.state = "running"
                     if was and not p.ready:

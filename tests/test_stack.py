@@ -1,5 +1,3 @@
-"""Integration tests that start real stacks. Linux only (dev container or Kaggle)."""
-
 import os
 import platform
 import signal
@@ -126,7 +124,7 @@ def test_oom_kill_and_backoff(tmp_path):
     s.create()
     path = os.path.join(s.home, "etc/supervisor.yaml")
     cfg = yaml.safe_load(open(path))
-    cfg["services"]["cache"]["memory_limit_mb"] = 5  # below a python process's RSS
+    cfg["services"]["cache"]["memory_limit_mb"] = 5
     yaml.safe_dump(cfg, open(path, "w"))
     try:
         s.start(timeout_s=12)
@@ -139,7 +137,7 @@ def test_oom_kill_and_backoff(tmp_path):
         assert st["restarts"] >= 2
         log = open(os.path.join(s.home, "logs/supervisor.log")).read()
         assert "Out of memory: killed process" in log
-        assert "restart_in_s=2" in log  # backoff grows 1 s -> 2 s
+        assert "restart_in_s=2" in log
     finally:
         s.cleanup()
 
@@ -160,11 +158,11 @@ def test_crashed_owner_is_swept_by_next_claim(tmp_path):
     home, private = p.stdout.readline().split()
     p.kill()
     p.wait()
-    time.sleep(2)  # supervisor notices its parent is gone and stops the services
-    assert os.path.isdir(home)  # nobody cleaned up yet
+    time.sleep(2)
+    assert os.path.isdir(home)
     s = Stack(seed=7, root=root)
     try:
-        s.create()  # reclaims a free block; the dead owner's block gets swept
+        s.create()
         deadline = time.time() + 5
         while time.time() < deadline and os.path.isdir(home):
             time.sleep(0.2)

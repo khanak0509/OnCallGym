@@ -1,15 +1,3 @@
-"""Evaluate a model on OnCallGym tasks with the shared loop (oncallgym.runner), the same
-code path training uses. Official numbers come from this runner on Kaggle (vLLM, fp16).
-
-    python -m oncallgym.evaluate --base-url http://127.0.0.1:8000 --backend vllm \\
-        --model Qwen/Qwen3-1.7B --split test --variants 0-2 --samples 1 \\
-        --out results/<run-name>
-
---backend llamacpp talks to llama.cpp's /completion (Mac dev runs only). Writes
-<out>/trajectories/*.json (0600) and runs eval/summarize-style aggregation into
-<out>/summary.json.
-"""
-
 import argparse
 import concurrent.futures as cf
 import json
@@ -84,7 +72,6 @@ def main(argv=None):
     ap.add_argument("--samples", type=int, default=1, help="episodes per task (pass@k)")
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--top-p", type=float, default=0.95)
-    # 20 = Qwen3's generation_config default, which vLLM applied implicitly before this flag
     ap.add_argument("--top-k", type=int, default=20)
     ap.add_argument("--parallel", type=int, default=6)
     ap.add_argument("--out", required=True)
