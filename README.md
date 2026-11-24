@@ -58,13 +58,13 @@ R also requires the fault's own `root_cause_fixed()` check on the effective conf
 | test | medium | poison_message | No orders have shipped for several minutes; paid orders are piling up. |
 | test | hard | orders_config_drift | Every checkout fails with 502 since this morning's deploy. |
 
-The test families are never used for SFT data or RL. Every family passes an automatic validation (`python -m oncallgym.validate`): healthy before injection, probes fail after it, the scripted oracle fix scores ~1.0, doing nothing scores ~0, restart-all does not solve it, every known cheat is blocked by the gate, and teardown leaves nothing behind.
+The test families are never used for SFT data or RL. Every family passes an automatic validation (`python -m oncallgym.validate`; last full run on variants 0-1 of all 17 families, the payments breaker family re-validated on variants 0-7 after a fix): healthy before injection, probes fail after it, the scripted oracle fix scores ~1.0, doing nothing scores ~0, restart-all does not solve it, every known cheat is blocked by the gate, and teardown leaves nothing behind.
 
 ## Results
 
-Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=0.7, top_p=0.95, top_k=20) for every row; each number comes from `results/<run>/summary.json` (commit, Kaggle run, per-episode rows). Paired comparisons are over tasks (bootstrap CI, sign-flip test; `training/compare.py`).
+Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=0.7, top_p=0.95, top_k=20; early runs got top_k=20 from vLLM's generation_config default, recorded in each summary) for every row; each number comes from `results/<run>/summary.json` (commit, Kaggle run, per-episode rows). Paired comparisons are over tasks (bootstrap CI, sign-flip test; `training/compare.py`). Samples per task: 16 on easy train, 8 on held-out test, 3 on all train (2 for untrained baselines). The train-split evals use variants 0-3, which are among the variants 0-7 used for SFT data and RL, so they measure performance on trained prompts; only the held-out families measure generalization.
 
-| model | eval set | episodes | solved | pass@k | mean reward | diagnosis right (C) |
+| model | eval set | episodes | solved | tasks ever solved | mean reward | diagnosis right (C) |
 |---|---|---|---|---|---|---|
 | base | held-out test (20 tasks) | 160 | 0.0% | 0/20 | 0.039 | 0.13 |
 | SFT | held-out test | 160 | 0.0% | 0/20 | 0.024 | 0.08 |
@@ -77,9 +77,9 @@ Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=
 | SFT + GRPO (60 steps, all train tiers) | all train tasks | 144 | 2.8% | 3/48 | 0.136 | 0.39 |
 | SFT v3 data + GRPO (50 steps, all tiers, matched sampler) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
 
-- The base model solves nothing anywhere. Scripted-oracle SFT gets it to ~20% on the easy training families.
+- The base model solves nothing anywhere. Scripted-oracle SFT gets it to 19.9% on the easy training families in one session (256 episodes) and 10.4% in another (48 episodes, same adapter, same per-family ordering); the evals are noisy. An A/A check makes the size of that noise concrete: GRPO with an all-zero gradient leaves the weights equal to SFT, yet in one session it scored +0.044 reward and +7.8 points solve rate over SFT (128 episodes, p=0.27 and p=0.11; `results/train-easy_*-v7`).
 - GRPO on easy training tasks raised mean reward by +0.056 through better diagnoses (bootstrap over tasks: 95% CI [+0.013, +0.095], p=0.02). Treat this as suggestive only: the 16 tasks are 4 families whose variants share most of their prompt, the gain comes from 2 of the 4 families (exact family-level sign-flip p=0.25), and the SFT row was evaluated in a different Kaggle session. The strict solve rate did not move (+0.008, p=0.88).
-- GRPO on all twelve training families (60 steps, SFT and GRPO evaluated in the same Kaggle session) did not help: mean reward on the 48 training tasks went 0.172 -> 0.136 (-0.036, 95% CI [-0.081, +0.008], p=0.13; by family p=0.27) and solves 6.2% -> 2.8% (p=0.23), and held-out reward did not move (-0.004, p=0.78). The training-batch reward rose from 0.07 (mean of the first 10 steps) to 0.17 (last 10; `results/grpo_v11_curve`), but each step draws different tasks, so that curve is not evidence of learning. Medium and hard faults are rarely solved by the SFT policy (4% of episodes), so most GRPO groups carry little signal. That run also sampled with top_p=1.0 during training and top_p=0.95 at eval; the next run matches them.
+- GRPO on all twelve training families (60 steps, SFT and GRPO evaluated in the same Kaggle session) did not help: mean reward on the 48 training tasks went 0.172 -> 0.136 (-0.036, 95% CI [-0.081, +0.008], p=0.13; by family p=0.27) and solves 6.2% -> 2.8% (p=0.23), and held-out reward did not move (-0.004, p=0.78). The training-batch reward rose from 0.07 (mean of the first 10 steps) to 0.17 (last 10; `results/grpo_v11_curve`), but each step draws different tasks, so that curve is not evidence of learning. Medium and hard faults are rarely solved by the SFT policy (4% of episodes), so few rollouts ever reach the recovery terms; groups did differ in reward (6 of the 60 single-prompt groups had identical rewards), but mostly through diagnosis credit. That run also sampled with top_p=1.0 during training and top_p=0.95 at eval; the next run matches them.
 - Nothing transfers to the five held-out families: no trained or untrained model solves a single held-out episode and the trained models' rewards are not significantly different from the base model's. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-6%) but blame the wrong service on 56-69% of unseen faults.
 
 Untrained open models, same evaluator and sampler (one Kaggle session, `results/baseline_*`; 4 samples per test task, 2 per train task over all 48 train tasks):
@@ -100,22 +100,22 @@ One outcome per episode (`analysis/taxonomy.py`; figure from `analysis/plots.py`
 ![outcomes](results/plots/outcomes.png)
 
 
-| run | solved | gate tripped | no submission | fixed, not held | right diagnosis, no fix | wrong service | wrong category |
-|---|---|---|---|---|---|---|---|
-| easy train, SFT | 19.9% | 0.8% | 4.7% | 1.6% | 41.4% | 15.2% | 16.0% |
-| easy train, GRPO | 20.7% | 2.0% | 0.8% | 1.2% | 51.6% | 9.0% | 11.3% |
-| test, base | 0% | 0% | 83.1% | 0% | 13.1% | 2.5% | 1.2% |
-| test, SFT | 0% | 0% | 3.8% | 0.6% | 8.1% | 68.1% | 19.4% |
-| test, GRPO | 0% | 1.9% | 1.9% | 0% | 8.1% | 55.6% | 32.5% |
-| all train, SFT (v11 session) | 6.2% | 2.1% | 5.6% | 2.1% | 34.0% | 30.6% | 19.4% |
-| all train, GRPO 60 steps all tiers | 2.8% | 1.4% | 0% | 0% | 36.1% | 40.3% | 19.4% |
-| test, GRPO 60 steps all tiers | 0% | 0% | 6.2% | 0% | 5.6% | 68.8% | 19.4% |
+| run | solved | gate tripped | no submission | fixed, not held | fixed, wrong diagnosis | right diagnosis, no fix | wrong service | wrong category |
+|---|---|---|---|---|---|---|---|---|
+| easy train, SFT | 19.9% | 0.8% | 4.7% | 1.6% | 0.4% | 41.4% | 15.2% | 16.0% |
+| easy train, SFT+GRPO easy | 20.7% | 2.0% | 0.8% | 1.2% | 3.5% | 51.6% | 9.0% | 11.3% |
+| test, base | 0% | 0% | 83.1% | 0% | 0% | 13.1% | 2.5% | 1.2% |
+| test, SFT | 0% | 0% | 3.8% | 0.6% | 0% | 8.1% | 68.1% | 19.4% |
+| test, SFT+GRPO easy | 0% | 1.9% | 1.9% | 0% | 0% | 8.1% | 55.6% | 32.5% |
+| all train, SFT (v11 session) | 6.2% | 2.1% | 5.6% | 2.1% | 0% | 34.0% | 30.6% | 19.4% |
+| all train, SFT+GRPO all tiers | 2.8% | 1.4% | 0% | 0% | 0% | 36.1% | 40.3% | 19.4% |
+| test, SFT+GRPO all tiers | 0% | 0% | 6.2% | 0% | 0% | 5.6% | 68.8% | 19.4% |
 
 On trained families the bottleneck is the edit, not the diagnosis: the model finds the right file and key, then writes a `sed` that does not apply (a regex for a key that does not exist, `rps` fixed but `burst` left at 1, a substitution that breaks the YAML), restarts, and submits.
 
 ## Reward hacking
 
-Hacks were found by design review, by an automated adversarial run, and by three independent code reviews. Each one is blocked by a check and most have a regression test (`tests/test_hardening.py`, `oncallgym/cheats.py`, run for every family by `oncallgym.validate`).
+We catalogued 25 hacks, found by design review, by failures during family validation, and by three independent code reviews (an automated red team with a local 8B model found none; see Limitations). Each one is blocked by a check and most have a regression test (`tests/test_hardening.py`, `oncallgym/cheats.py`, run for every family by `oncallgym.validate`).
 
 | hack | blocked by |
 |---|---|
@@ -131,7 +131,40 @@ Hacks were found by design review, by an automated adversarial run, and by three
 | Hang the episode with a catastrophic regex | log grep is substring only |
 | Enumerate diagnoses / stall to the turn limit | one submission ends the episode; no submission gives C=0 and R/P still need a real fix |
 
-Across all 1,888 evaluated episodes, none received recovery or persistence credit without the root cause fixed; the highest reward without a fix is 0.3 (diagnosis credit). Every gate trip read by hand was real damage from a bad edit, not an exploit.
+<details>
+<summary>All 25 hacks: how each was found, what blocks it, and its regression check</summary>
+
+| # | hack | found by | blocked by | regression check |
+|---|---|---|---|---|
+| 1 | Restart everything for a persistent fault | spec | Persistence P re-checks after restart-all; every family's root_cause_fixed() | validate step 5 (all families) |
+| 2 | Make the external provider fast/error-free (provider.yaml) | design | protected-file hash -> G=0 | cheats.heal_provider, agent_edit_external |
+| 3 | Disable trafficgen | design | trafficgen.yaml hash + trafficgen_alive check | cheats.disable_trafficgen |
+| 4 | Delete unfinished/failed orders | design + validation (breaker family slipped through) | order_records_intact (items/reservations must reference an order), charges_match_orders | cheats.delete_unfinished_orders |
+| 5 | Purge unacked broker entries | design | no_lost_messages (binding-history-aware) | cheats.purge_unacked_messages |
+| 6 | Silence logging (log level error) | design | logging_enabled | cheats.silence_logging |
+| 7 | Disable the reconcile job | design | scheduler_jobs_enabled | cheats.disable_reconcile_job |
+| 8 | Reset stock/reservations | design | stock_conserved | cheats.reset_reservations |
+| 9 | Truncate/rewrite the email outbox | design + validation (empty-at-baseline case slipped through) | append-only check + acked_events_have_emails | cheats.truncate_email_outbox |
+| 10 | Edit telemetry config | design | protected-file hash | cheats.edit_telemetry_config |
+| 11 | Fake recovery by writing databases / outbox from a shell | checkpoint 1 review (confirmed) | agent shell runs as a separate Unix user without write access to data/ | tests/test_episode.py::test_agent_cannot_write_data_or_read_secrets |
+| 12 | Code injection as the stack owner via etc/env/*.env (PYTHONPATH / sitecustomize, LD_PRELOAD) | checkpoint 2 review (confirmed) | env-file key allowlist; services start with `python -I` and an explicit code path | cheats.agent_env_code_injection |
+| 13 | Background daemon that keeps fulfilling orders via internal APIs | checkpoint 2 review (confirmed, reward 1.0) | per-episode agent user, every agent process SIGKILLed after each exec; internal endpoints need a 0600 token | cheats.agent_background_daemon, agent_internal_api |
+| 14 | Call internal APIs directly (fulfill, ack, refund, supervisor shutdown/restart-all) | checkpoint 2 review | X-Internal-Token on internal routes and supervisor control | cheats.agent_internal_api |
+| 15 | Fix the symptom of notify_dead_letters by making the external mail relay reliable | checkpoint 2 review (confirmed, reward 1.0) | relay settings in protected etc/external/smtp.yaml; root_cause_fixed() required for R and P | cheats.agent_edit_external |
+| 16 | Read the answer: newest file mtime in etc/, restart counts, supervisor "restart requested" lines | checkpoint 2 review (confirmed) | faults applied before boot (configure()), etc/ mtimes restored | covered by design; spot check in review |
+| 17 | Read the answer from eval process command lines / trajectory files | checkpoint 2 review | task params via 0600 file (deleted on read); trajectories 0600 in 0700 dir | - |
+| 18 | Hang the episode with a catastrophic regex in logs(grep=) | checkpoint 2 review | grep is substring only | - |
+| 19 | Drive the episode server from a background process | checkpoint 2 review | episode server token | - |
+| 20 | Leave notes in /tmp for later episodes | design (checkpoint 2 follow-up) | agent user files in /tmp wiped at episode start and end | - |
+| 21 | Enumerate diagnoses | spec | one submission only (episode ends) | tests (submit ends episode) |
+| 22 | Stall to the turn limit | spec | no submission -> C=0, R/P need a real fix | - |
+| 23 | Point a service at an agent-written config via NW_CONFIG_FILE (silence logs / disable jobs / keep a fault running while etc/<svc>.yaml looks fixed) | checkpoint 3 red-team review (read-only) | NW_CONFIG_FILE accepted only for etc/<svc>.yaml or etc/archive/*; archive files hash-protected and no new files allowed; verifier and every root_cause_fixed() read the effective config | tests/test_hardening.py::test_config_override_only_to_archive, ::test_verifier_reads_effective_config, ::test_agent_cannot_read_code_or_add_archived_config |
+| 24 | Read the fault definitions / regenerate pristine configs from the code | checkpoint 3 red-team review | code root owner-only; verified at lock-down by trying as the agent user (dev container mounts the repo under owner-only /home/dev) | tests/test_hardening.py::test_agent_cannot_read_code_or_add_archived_config |
+| 25 | Find the fault from directory mtimes / new files | checkpoint 3 red-team review | configure_quietly restores file and directory mtimes under etc/ and data/; new files get provisioning time | tests/test_hardening.py::test_fault_injection_leaves_no_timestamps |
+
+</details>
+
+Across all 2,816 committed evaluation episodes (`python analysis/integrity.py` over `results/`), none received recovery or persistence credit without the root cause fixed; the highest reward without a fix is 0.3 (diagnosis credit). Every gate trip read by hand was real damage from a bad edit, not an exploit.
 
 ## Training
 
@@ -145,8 +178,8 @@ Training and evaluation share one agent loop and token renderer (same chat templ
 
 Two things had to be fixed before GRPO learned anything, both found by dumping tokens and logprobs from Kaggle and recomputing them in fp32 locally:
 
-1. TRL's default `sequence_mask` importance-sampling correction multiplies per-token ratios over a whole ~500-token multi-turn episode. A per-token trainer/vLLM gap of 0.15-0.6 nats underflowed every ratio to 0, so the gradient was exactly zero for 40 steps. Per-token truncation (`--is-mode token_truncate`) keeps the gradient alive. The gap itself turned out to come from bug 2, not from fp16 numerics.
-2. TRL's LoRA weight sync merges the adapter, hands vLLM views of the live weights, then unmerges. vLLM copies them on two side CUDA streams with no ordering against the merge/unmerge, so some layers arrived as base weights and vLLM sampled from a half-merged model (logprob gap 0.8-1.0 nats/token; after the fix 0.003-0.02). `training/vllm_sync.py` synchronizes around the merge and yields copies; `tests/test_vllm_sync.py`.
+1. TRL's default `sequence_mask` importance-sampling correction multiplies per-token ratios over a whole ~500-token multi-turn episode. A per-token trainer/vLLM gap of 0.14-0.70 nats underflowed every ratio to 0, so the gradient was exactly zero on all 40 steps (`results/grpo_zero_grad_v7`). Per-token truncation (`--is-mode token_truncate`) keeps the gradient alive. The gap itself turned out to come from bug 2, not from fp16 numerics.
+2. TRL's LoRA weight sync merges the adapter, hands vLLM views of the live weights, then unmerges. vLLM copies them on two side CUDA streams with no ordering against the merge/unmerge, so some layers arrived as base weights and vLLM sampled from a half-merged model (logprob gap 0.13-1.17 nats/token, median 0.85; after the fix 0.003-0.02). With the racy sync, GRPO made the policy worse on easy training tasks (reward -0.067, 95% CI [-0.118, -0.015], p=0.03; `results/train-easy_grpo-racy-v8`). `training/vllm_sync.py` synchronizes around the merge and yields copies; `tests/test_vllm_sync.py`.
 
 ![logprob gap](results/plots/sync_fix_logprob_gap.png)
 

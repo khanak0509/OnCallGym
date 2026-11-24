@@ -1,0 +1,289 @@
+{
+ "provenance": {
+  "commit": "78f837a",
+  "source": "kaggle oncallgym-train v7, grpo.log",
+  "model": "SFT + GRPO 40 steps easy, TRL default sequence_mask IS, racy sync"
+ },
+ "steps": [
+  {
+   "step": 1,
+   "grad_norm": 0.0,
+   "reward": 0.1875,
+   "logp_gap_mean": 0.1398,
+   "is_ratio_mean": 1.204e-09
+  },
+  {
+   "step": 2,
+   "grad_norm": 0.0,
+   "reward": 0.1125,
+   "logp_gap_mean": 0.5681,
+   "is_ratio_mean": 1.178e-35
+  },
+  {
+   "step": 3,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.64,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 4,
+   "grad_norm": 0.0,
+   "reward": 0.1625,
+   "logp_gap_mean": 0.5797,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 5,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.6149,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 6,
+   "grad_norm": 0.0,
+   "reward": 0.1125,
+   "logp_gap_mean": 0.6369,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 7,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.4766,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 8,
+   "grad_norm": 0.0,
+   "reward": 0.1125,
+   "logp_gap_mean": 0.4616,
+   "is_ratio_mean": 1.499e-43
+  },
+  {
+   "step": 9,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.5201,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 10,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.6176,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 11,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.5738,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 12,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.6333,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 13,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.538,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 14,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.5911,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 15,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.5407,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 16,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.6527,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 17,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.5828,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 18,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.6784,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 19,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.6677,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 20,
+   "grad_norm": 0.0,
+   "reward": 0.1125,
+   "logp_gap_mean": 0.6417,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 21,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.5184,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 22,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.5339,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 23,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.5656,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 24,
+   "grad_norm": 0.0,
+   "reward": 0.2,
+   "logp_gap_mean": 0.6157,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 25,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.655,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 26,
+   "grad_norm": 0.0,
+   "reward": 0.075,
+   "logp_gap_mean": 0.4549,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 27,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.5864,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 28,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.5843,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 29,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.5781,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 30,
+   "grad_norm": 0.0,
+   "reward": 0.1125,
+   "logp_gap_mean": 0.7041,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 31,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.5989,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 32,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.6527,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 33,
+   "grad_norm": 0.0,
+   "reward": 0.1125,
+   "logp_gap_mean": 0.6068,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 34,
+   "grad_norm": 0.0,
+   "reward": 0.0375,
+   "logp_gap_mean": 0.6438,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 35,
+   "grad_norm": 0.0,
+   "reward": 0.275,
+   "logp_gap_mean": 0.2872,
+   "is_ratio_mean": 1.078e-18
+  },
+  {
+   "step": 36,
+   "grad_norm": 0.0,
+   "reward": 0.125,
+   "logp_gap_mean": 0.5251,
+   "is_ratio_mean": 4.134e-43
+  },
+  {
+   "step": 37,
+   "grad_norm": 0.0,
+   "reward": 0.15,
+   "logp_gap_mean": 0.5076,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 38,
+   "grad_norm": 0.0,
+   "reward": 0.0,
+   "logp_gap_mean": 0.545,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 39,
+   "grad_norm": 0.0,
+   "reward": 0.15,
+   "logp_gap_mean": 0.6851,
+   "is_ratio_mean": 0.0
+  },
+  {
+   "step": 40,
+   "grad_norm": 0.0,
+   "reward": 0.1625,
+   "logp_gap_mean": 0.6897,
+   "is_ratio_mean": 0.0
+  }
+ ]
+}

@@ -19,6 +19,11 @@ def export(src, dest, commit, source, model_desc=None):
         d = b.get("details") or {}
         rc = d.get("root_cause") or {}
         task, sample = f.stem.rsplit("-", 1)
+        calls = [
+            json.dumps([e.get("name"), e.get("args")], sort_keys=True)
+            for e in ev
+            if e.get("kind") == "tool"
+        ]
         rows.append(
             {
                 "task": task,
@@ -34,6 +39,8 @@ def export(src, dest, commit, source, model_desc=None):
                 "component_ok": bool(rc.get("component_ok")),
                 "termination": b["termination"],
                 "turns": d.get("turns"),
+                "tool_calls": len(calls),
+                "repeat_calls": len(calls) - len(set(calls)),
                 "outcome": outcome(b),
             }
         )
@@ -50,7 +57,11 @@ def export(src, dest, commit, source, model_desc=None):
         **{f"mean_{k}": sum(r[k] for r in rows) / n for k in "RPCG"},
         "mean_turns": sum(r["turns"] or 0 for r in rows) / n,
         "outcomes": {k: sum(r["outcome"] == k for r in rows) / n for k in ORDER},
+        "repeat_call_share": sum(r["repeat_calls"] for r in rows)
+        / max(1, sum(r["tool_calls"] for r in rows)),
     }
+    if meta.get("backend") == "vllm" and "top_k" not in meta:
+        meta = {**meta, "top_k": 20, "top_k_source": "vLLM generation_config default"}
     out = {
         "provenance": {"commit": commit, "source": source, "model": model_desc or meta["model"]},
         "eval_settings": meta,

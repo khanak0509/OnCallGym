@@ -17,7 +17,9 @@
   "episodes": 96,
   "pass_at_k": 0.0,
   "solve_rate": 0.0,
-  "mean_reward": 0.0
+  "mean_reward": 0.0,
+  "top_k": 20,
+  "top_k_source": "vLLM generation_config default"
  },
  "aggregate": {
   "episodes": 96,
@@ -39,7 +41,8 @@
    "diag_no_fix": 0.0,
    "wrong_component": 0.020833333333333332,
    "wrong_category": 0.03125
-  }
+  },
+  "repeat_call_share": 0.1542056074766355
  },
  "episodes": [
   {
@@ -56,6 +59,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 10,
+   "tool_calls": 10,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -72,6 +77,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -88,6 +95,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 11,
+   "tool_calls": 11,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -104,6 +113,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -120,6 +131,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -136,6 +149,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -152,6 +167,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -168,6 +185,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -184,6 +203,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -200,6 +221,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -216,6 +239,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -232,6 +257,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -248,6 +275,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -264,6 +293,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -280,6 +311,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -296,6 +329,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 4,
    "outcome": "no_submission"
   },
   {
@@ -312,6 +347,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -328,6 +365,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -344,6 +383,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -360,6 +401,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -376,6 +419,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -392,6 +437,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -408,6 +455,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -424,6 +473,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -440,6 +491,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -456,6 +509,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -472,6 +527,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -488,6 +545,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -504,6 +563,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -520,6 +581,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -536,6 +599,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -552,6 +617,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -568,6 +635,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 8,
    "outcome": "no_submission"
   },
   {
@@ -584,6 +653,8 @@
    "component_ok": true,
    "termination": "submitted",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 6,
    "outcome": "wrong_category"
   },
   {
@@ -600,6 +671,8 @@
    "component_ok": true,
    "termination": "submitted",
    "turns": 4,
+   "tool_calls": 4,
+   "repeat_calls": 0,
    "outcome": "wrong_category"
   },
   {
@@ -616,6 +689,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 10,
    "outcome": "no_submission"
   },
   {
@@ -632,6 +707,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 10,
    "outcome": "no_submission"
   },
   {
@@ -648,6 +725,8 @@
    "component_ok": true,
    "termination": "submitted",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 6,
    "outcome": "wrong_category"
   },
   {
@@ -664,6 +743,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 8,
    "outcome": "no_submission"
   },
   {
@@ -680,6 +761,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 7,
    "outcome": "no_submission"
   },
   {
@@ -696,6 +779,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -712,6 +797,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -728,6 +815,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -744,6 +833,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -760,6 +851,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -776,6 +869,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -792,6 +887,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -808,6 +905,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -824,6 +923,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -840,6 +941,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -856,6 +959,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -872,6 +977,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -888,6 +995,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -904,6 +1013,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -920,6 +1031,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -936,6 +1049,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -952,6 +1067,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 13,
+   "tool_calls": 13,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -968,6 +1085,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -984,6 +1103,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 4,
    "outcome": "no_submission"
   },
   {
@@ -1000,6 +1121,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -1016,6 +1139,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 6,
    "outcome": "no_submission"
   },
   {
@@ -1032,6 +1157,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1048,6 +1175,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1064,6 +1193,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1080,6 +1211,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -1096,6 +1229,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -1112,6 +1247,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1128,6 +1265,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -1144,6 +1283,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -1160,6 +1301,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 5,
    "outcome": "no_submission"
   },
   {
@@ -1176,6 +1319,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -1192,6 +1337,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 7,
    "outcome": "no_submission"
   },
   {
@@ -1208,6 +1355,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -1224,6 +1373,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -1240,6 +1391,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -1256,6 +1409,8 @@
    "component_ok": false,
    "termination": "submitted",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 1,
    "outcome": "wrong_component"
   },
   {
@@ -1272,6 +1427,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1288,6 +1445,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1304,6 +1463,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1320,6 +1481,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 14,
+   "tool_calls": 14,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1336,6 +1499,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1352,6 +1517,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -1368,6 +1535,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1384,6 +1553,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1400,6 +1571,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1416,6 +1589,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1432,6 +1607,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 16,
+   "tool_calls": 16,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1448,6 +1625,8 @@
    "component_ok": false,
    "termination": "submitted",
    "turns": 15,
+   "tool_calls": 15,
+   "repeat_calls": 1,
    "outcome": "wrong_component"
   },
   {
@@ -1464,6 +1643,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -1480,6 +1661,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 3,
    "outcome": "no_submission"
   },
   {
@@ -1496,6 +1679,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 10,
+   "tool_calls": 10,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -1512,6 +1697,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 10,
+   "tool_calls": 10,
+   "repeat_calls": 2,
    "outcome": "no_submission"
   },
   {
@@ -1528,6 +1715,8 @@
    "component_ok": false,
    "termination": "context_exhausted",
    "turns": 9,
+   "tool_calls": 9,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   },
   {
@@ -1544,6 +1733,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1560,6 +1751,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 0,
    "outcome": "no_submission"
   },
   {
@@ -1576,6 +1769,8 @@
    "component_ok": false,
    "termination": "turn_limit",
    "turns": 12,
+   "tool_calls": 12,
+   "repeat_calls": 1,
    "outcome": "no_submission"
   }
  ]
