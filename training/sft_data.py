@@ -174,6 +174,7 @@ def main():
     ap.add_argument("--tokenizer", default="Qwen/Qwen3-1.7B")
     ap.add_argument("--out", required=True)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--resume", action="store_true", help="append, skipping rows already written")
     a = ap.parse_args()
 
     import concurrent.futures as cf
@@ -191,14 +192,23 @@ def main():
         for k in range(a.per_task)
     ]
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    n = 0
-    with open(a.out, "w") as f, cf.ThreadPoolExecutor(a.workers) as ex:
+    done = set()
+    if a.resume and os.path.exists(a.out):
+        with open(a.out) as f:
+            for line in f:
+                r = json.loads(line)
+                fam, var = r["variant"].split("/")
+                done.add((fam, int(var), r["aug"]))
+        jobs = [j for j in jobs if j not in done]
+        print(f"resuming: {len(done)} rows already written, {len(jobs)} to go", flush=True)
+    n = len(done)
+    with open(a.out, "a" if a.resume else "w") as f, cf.ThreadPoolExecutor(a.workers) as ex:
         for row in ex.map(lambda j: play(*j, renderer, eos_ids), jobs):
             if row:
                 f.write(json.dumps(row) + "\n")
                 f.flush()
                 n += 1
-    print(f"wrote {n}/{len(jobs)} rows to {a.out}")
+    print(f"wrote {n}/{len(jobs) + len(done)} rows to {a.out}")
 
 
 if __name__ == "__main__":
