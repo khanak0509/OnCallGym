@@ -62,7 +62,7 @@ The test families are never used for SFT data or RL. Every family passes an auto
 
 ## Results
 
-Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=0.7, top_p=0.95) for every row; each number comes from `results/<run>/summary.json` (commit, Kaggle run, per-episode rows). Paired comparisons are over tasks (bootstrap CI, sign-flip test; `training/compare.py`).
+Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=0.7, top_p=0.95, top_k=20) for every row; each number comes from `results/<run>/summary.json` (commit, Kaggle run, per-episode rows). Paired comparisons are over tasks (bootstrap CI, sign-flip test; `training/compare.py`).
 
 | model | eval set | episodes | solved | pass@k | mean reward | diagnosis right (C) |
 |---|---|---|---|---|---|---|
@@ -74,7 +74,7 @@ Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=
 | SFT + GRPO (60 steps, all train tiers) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
 
 - The base model solves nothing anywhere. Scripted-oracle SFT gets it to ~20% on the easy training families.
-- GRPO on easy training tasks raised mean reward by +0.056 (95% CI [+0.013, +0.095], p=0.02) through better diagnoses; the strict solve rate did not move (+0.008, p=0.88).
+- GRPO on easy training tasks raised mean reward by +0.056 through better diagnoses (bootstrap over tasks: 95% CI [+0.013, +0.095], p=0.02). Treat this as suggestive only: the 16 tasks are 4 families whose variants share most of their prompt, the gain comes from 2 of the 4 families (exact family-level sign-flip p=0.25), and the SFT row was evaluated in a different Kaggle session. The strict solve rate did not move (+0.008, p=0.88).
 - Nothing transfers to the five held-out families: all three models solve 0/160 and their rewards are not significantly different. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-4%) but blame the wrong service on 56-68% of unseen faults.
 
 Baselines (open models, no training, same settings): TBD (Qwen3-0.6B / 1.7B / 4B / 8B, running).
@@ -125,7 +125,7 @@ Training and evaluation share one agent loop and token renderer (same chat templ
 
 Two things had to be fixed before GRPO learned anything, both found by dumping tokens and logprobs from Kaggle and recomputing them in fp32 locally:
 
-1. TRL's default `sequence_mask` importance-sampling correction multiplies per-token ratios over a whole ~500-token multi-turn episode. Small fp16 differences underflowed every ratio to 0, so the gradient was exactly zero for 40 steps. Fixed with per-token truncation (`--is-mode token_truncate`).
+1. TRL's default `sequence_mask` importance-sampling correction multiplies per-token ratios over a whole ~500-token multi-turn episode. A per-token trainer/vLLM gap of 0.15-0.6 nats underflowed every ratio to 0, so the gradient was exactly zero for 40 steps. Per-token truncation (`--is-mode token_truncate`) keeps the gradient alive. The gap itself turned out to come from bug 2, not from fp16 numerics.
 2. TRL's LoRA weight sync merges the adapter, hands vLLM views of the live weights, then unmerges. vLLM copies them on two side CUDA streams with no ordering against the merge/unmerge, so some layers arrived as base weights and vLLM sampled from a half-merged model (logprob gap 0.8-1.0 nats/token; after the fix 0.003-0.02). `training/vllm_sync.py` synchronizes around the merge and yields copies; `tests/test_vllm_sync.py`.
 
 ## Running it
