@@ -70,8 +70,10 @@ GROUPS = [
 RUNS = [
     ("easy train · SFT", "train-easy_sft"),
     ("easy train · SFT+GRPO easy", "train-easy_grpo-easy40"),
-    ("all train · SFT", "train-all_sft-v11"),
-    ("all train · SFT+GRPO all tiers", "train-all_grpo-v11"),
+    ("all train · SFT v5", "train-all_sft-v11"),
+    ("all train · SFT v5+GRPO all tiers", "train-all_grpo-v11"),
+    ("all train · SFT v3", "train-all_sft-v12"),
+    ("all train · SFT v3+GRPO matched", "train-all_grpo-v12"),
     ("held-out · base", "test_base-1.7b"),
     ("held-out · SFT", "test_sft"),
     ("held-out · SFT+GRPO easy", "test_grpo-easy40"),
@@ -79,7 +81,7 @@ RUNS = [
 
 
 def outcomes():
-    fig, ax = plt.subplots(figsize=(8, 4.4))
+    fig, ax = plt.subplots(figsize=(8, 5.0))
     labels = [r[0] for r in RUNS][::-1]
     data = [load(r[1])["aggregate"]["outcomes"] for r in RUNS][::-1]
     left = [0.0] * len(data)

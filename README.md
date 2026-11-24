@@ -75,12 +75,16 @@ Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=
 | SFT + GRPO (60 steps, all train tiers) | held-out test | 160 | 0.0% | 0/20 | 0.017 | 0.06 |
 | SFT (rerun, same session) | all train tasks (48) | 144 | 6.2% | 9/48 | 0.172 | 0.43 |
 | SFT + GRPO (60 steps, all train tiers) | all train tasks | 144 | 2.8% | 3/48 | 0.136 | 0.39 |
-| SFT v3 data + GRPO (50 steps, all tiers, matched sampler) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
+| SFT v3 data (same session as next rows) | held-out test | 160 | 0.0% | 0/20 | 0.017 | 0.06 |
+| SFT v3 + GRPO (50 steps, all tiers, matched sampler) | held-out test | 160 | 0.0% | 0/20 | 0.013 | 0.04 |
+| SFT v3 data (same session) | all train tasks (48) | 144 | 9.0% | 10/48 | 0.179 | 0.38 |
+| SFT v3 + GRPO (50 steps, all tiers, matched sampler) | all train tasks | 144 | 8.3% | 6/48 | 0.136 | 0.25 |
 
 - The base model solves nothing anywhere. Scripted-oracle SFT gets it to 19.9% on the easy training families in one session (256 episodes) and 10.4% in another (48 episodes, same adapter, same per-family ordering); the evals are noisy. An A/A check makes the size of that noise concrete: GRPO with an all-zero gradient leaves the weights equal to SFT, yet in one session it scored +0.044 reward and +7.8 points solve rate over SFT (128 episodes, p=0.27 and p=0.11; `results/train-easy_*-v7`).
 - GRPO on easy training tasks raised mean reward by +0.056 through better diagnoses (bootstrap over tasks: 95% CI [+0.013, +0.095], p=0.02). Treat this as suggestive only: the 16 tasks are 4 families whose variants share most of their prompt, the gain comes from 2 of the 4 families (exact family-level sign-flip p=0.25), and the SFT row was evaluated in a different Kaggle session. The strict solve rate did not move (+0.008, p=0.88).
 - GRPO on all twelve training families (60 steps, SFT and GRPO evaluated in the same Kaggle session) did not help: mean reward on the 48 training tasks went 0.172 -> 0.136 (-0.036, 95% CI [-0.081, +0.008], p=0.13; by family p=0.27) and solves 6.2% -> 2.8% (p=0.23), and held-out reward did not move (-0.004, p=0.78). The training-batch reward rose from 0.07 (mean of the first 10 steps) to 0.17 (last 10; `results/grpo_v11_curve`), but each step draws different tasks, so that curve is not evidence of learning. Medium and hard faults are rarely solved by the SFT policy (4% of episodes), so few rollouts ever reach the recovery terms; groups did differ in reward (6 of the 60 single-prompt groups had identical rewards), but mostly through diagnosis credit. That run also sampled with top_p=1.0 during training and top_p=0.95 at eval; the next run matches them.
-- Nothing transfers to the five held-out families: no trained or untrained model solves a single held-out episode and the trained models' rewards are not significantly different from the base model's. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-6%) but blame the wrong service on 56-69% of unseen faults.
+- A second all-tier run with the sampler matched between training and eval (SFT on regenerated data, 50 GRPO steps, both arms in one session) repeated the pattern, and here the drop in diagnosis quality is significant: the right category and service on training tasks fell from 0.38 to 0.25 (-0.132, 95% CI [-0.222, -0.042], p=0.009; by family p=0.012, lower in 8 of 12 families), mean reward fell 0.179 -> 0.136 (p=0.14; by family p=0.07), solves stayed flat (9.0% -> 8.3%) and held-out reward did not move (p=0.84). Its training-batch reward rose from 0.13 to 0.25 (first vs last 10 steps, `results/grpo_v12_curve`), the same disconnect as before. Our reading: with 50-60 single-prompt steps over twelve families, GRPO fits the few batches it sees and degrades the broad diagnosis behaviour SFT taught; we have not isolated the cause.
+- Nothing transfers to the five held-out families: no trained or untrained model solves a single held-out episode and the trained models' rewards are not significantly different from the base model's. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-10%) but blame the wrong service on 56-71% of unseen faults.
 
 Untrained open models, same evaluator and sampler (one Kaggle session, `results/baseline_*`; 4 samples per test task, 2 per train task over all 48 train tasks):
 
@@ -110,6 +114,9 @@ One outcome per episode (`analysis/taxonomy.py`; figure from `analysis/plots.py`
 | all train, SFT (v11 session) | 6.2% | 2.1% | 5.6% | 2.1% | 0% | 34.0% | 30.6% | 19.4% |
 | all train, SFT+GRPO all tiers | 2.8% | 1.4% | 0% | 0% | 0% | 36.1% | 40.3% | 19.4% |
 | test, SFT+GRPO all tiers | 0% | 0% | 6.2% | 0% | 0% | 5.6% | 68.8% | 19.4% |
+| all train, SFT v3 (v12 session) | 9.0% | 1.4% | 5.6% | 2.1% | 0.7% | 26.4% | 38.9% | 16.0% |
+| all train, SFT v3+GRPO matched | 8.3% | 2.8% | 7.6% | 0% | 0.7% | 16.0% | 47.2% | 17.4% |
+| test, SFT v3+GRPO matched | 0% | 0% | 10.0% | 0% | 0% | 4.4% | 65.0% | 20.6% |
 
 On trained families the bottleneck is the edit, not the diagnosis: the model finds the right file and key, then writes a `sed` that does not apply (a regex for a key that does not exist, `rps` fixed but `burst` left at 1, a substitution that breaks the YAML), restarts, and submits.
 
@@ -164,7 +171,7 @@ We catalogued 25 hacks, found by design review, by failures during family valida
 
 </details>
 
-Across all 2,816 committed evaluation episodes (`python analysis/integrity.py` over `results/`), none received recovery or persistence credit without the root cause fixed; the highest reward without a fix is 0.3 (diagnosis credit). Every gate trip read by hand was real damage from a bad edit, not an exploit.
+Across all 3,424 committed evaluation episodes (`python analysis/integrity.py` over `results/`), none received recovery or persistence credit without the root cause fixed; the highest reward without a fix is 0.3 (diagnosis credit). Every gate trip read by hand was real damage from a bad edit, not an exploit.
 
 ## Training
 

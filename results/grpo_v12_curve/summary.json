@@ -1,0 +1,461 @@
+{
+ "provenance": {
+  "commit": "e4c279a",
+  "source": "kaggle oncallgym-train2 v1, grpo.log",
+  "model": "Qwen3-1.7B + SFT (v3 data, 2 epochs) + GRPO all train tiers",
+  "args": "--is-mode token_truncate --temperature 0.7 --top-p 0.95 --top-k 20 (defaults) --save-every 5, 50 steps"
+ },
+ "steps": [
+  {
+   "step": 1,
+   "reward": 0.15,
+   "reward_std": 0.1604,
+   "grad_norm": 1.78,
+   "logp_gap_mean": 0.009977,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 346.1
+  },
+  {
+   "step": 2,
+   "reward": 0.6625,
+   "reward_std": 0.4069,
+   "grad_norm": 2.184,
+   "logp_gap_mean": 0.00974,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 278.6
+  },
+  {
+   "step": 3,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.0111,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 458.8
+  },
+  {
+   "step": 4,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.01716,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 458.2
+  },
+  {
+   "step": 5,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.268,
+   "logp_gap_mean": 0.01483,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 345.0
+  },
+  {
+   "step": 6,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.005253,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 1217.0
+  },
+  {
+   "step": 7,
+   "reward": 0.125,
+   "reward_std": 0.3536,
+   "grad_norm": 1.188,
+   "logp_gap_mean": 0.009734,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 395.4
+  },
+  {
+   "step": 8,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.239,
+   "logp_gap_mean": 0.01205,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 472.1
+  },
+  {
+   "step": 9,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 1.335,
+   "logp_gap_mean": 0.01175,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 456.2
+  },
+  {
+   "step": 10,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.313,
+   "logp_gap_mean": 0.01726,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 408.9
+  },
+  {
+   "step": 11,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.01517,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 373.6
+  },
+  {
+   "step": 12,
+   "reward": 0.075,
+   "reward_std": 0.1389,
+   "grad_norm": 1.161,
+   "logp_gap_mean": 0.01709,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 346.9
+  },
+  {
+   "step": 13,
+   "reward": 0.0875,
+   "reward_std": 0.2475,
+   "grad_norm": 1.164,
+   "logp_gap_mean": 0.01225,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 463.6
+  },
+  {
+   "step": 14,
+   "reward": 0.75,
+   "reward_std": 0.3928,
+   "grad_norm": 1.352,
+   "logp_gap_mean": 0.00631,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 269.5
+  },
+  {
+   "step": 15,
+   "reward": 0.275,
+   "reward_std": 0.3284,
+   "grad_norm": 1.327,
+   "logp_gap_mean": 0.01074,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 318.4
+  },
+  {
+   "step": 16,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 1.405,
+   "logp_gap_mean": 0.01458,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 410.1
+  },
+  {
+   "step": 17,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.01111,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 442.2
+  },
+  {
+   "step": 18,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 0.9715,
+   "logp_gap_mean": 0.01604,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 469.9
+  },
+  {
+   "step": 19,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.005,
+   "logp_gap_mean": 0.009998,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 430.5
+  },
+  {
+   "step": 20,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.0186,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 479.2
+  },
+  {
+   "step": 21,
+   "reward": 0.375,
+   "reward_std": 0.4559,
+   "grad_norm": 1.288,
+   "logp_gap_mean": 0.008803,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 278.4
+  },
+  {
+   "step": 22,
+   "reward": 0.3125,
+   "reward_std": 0.3091,
+   "grad_norm": 1.008,
+   "logp_gap_mean": 0.01067,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 403.5
+  },
+  {
+   "step": 23,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.45,
+   "logp_gap_mean": 0.01094,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 370.2
+  },
+  {
+   "step": 24,
+   "reward": 0.075,
+   "reward_std": 0.1389,
+   "grad_norm": 1.415,
+   "logp_gap_mean": 0.01845,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 434.9
+  },
+  {
+   "step": 25,
+   "reward": 0.075,
+   "reward_std": 0.1389,
+   "grad_norm": 1.318,
+   "logp_gap_mean": 0.01054,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 343.4
+  },
+  {
+   "step": 26,
+   "reward": 0.15,
+   "reward_std": 0.1604,
+   "grad_norm": 1.277,
+   "logp_gap_mean": 0.01151,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 354.9
+  },
+  {
+   "step": 27,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 1.397,
+   "logp_gap_mean": 0.01101,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 433.2
+  },
+  {
+   "step": 28,
+   "reward": 0.1875,
+   "reward_std": 0.1553,
+   "grad_norm": 1.37,
+   "logp_gap_mean": 0.01121,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 429.6
+  },
+  {
+   "step": 29,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.01481,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 391.2
+  },
+  {
+   "step": 30,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 0.8049,
+   "logp_gap_mean": 0.01256,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 529.4
+  },
+  {
+   "step": 31,
+   "reward": 0.0,
+   "reward_std": 0.0,
+   "grad_norm": 0.0,
+   "logp_gap_mean": 0.01727,
+   "frac_reward_zero_std": 1.0,
+   "completion_mean_length": 474.2
+  },
+  {
+   "step": 32,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.449,
+   "logp_gap_mean": 0.01343,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 429.6
+  },
+  {
+   "step": 33,
+   "reward": 0.2625,
+   "reward_std": 0.1061,
+   "grad_norm": 1.935,
+   "logp_gap_mean": 0.007533,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 354.1
+  },
+  {
+   "step": 34,
+   "reward": 0.1625,
+   "reward_std": 0.3543,
+   "grad_norm": 0.5499,
+   "logp_gap_mean": 0.008918,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 538.6
+  },
+  {
+   "step": 35,
+   "reward": 0.4875,
+   "reward_std": 0.4422,
+   "grad_norm": 1.192,
+   "logp_gap_mean": 0.01083,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 366.8
+  },
+  {
+   "step": 36,
+   "reward": 0.2,
+   "reward_std": 0.3505,
+   "grad_norm": 0.8501,
+   "logp_gap_mean": 0.01447,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 360.1
+  },
+  {
+   "step": 37,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 1.855,
+   "logp_gap_mean": 0.0118,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 435.0
+  },
+  {
+   "step": 38,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 0.8101,
+   "logp_gap_mean": 0.009722,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 690.0
+  },
+  {
+   "step": 39,
+   "reward": 0.2125,
+   "reward_std": 0.4016,
+   "grad_norm": 0.7992,
+   "logp_gap_mean": 0.01238,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 432.1
+  },
+  {
+   "step": 40,
+   "reward": 0.225,
+   "reward_std": 0.1389,
+   "grad_norm": 1.788,
+   "logp_gap_mean": 0.01415,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 314.8
+  },
+  {
+   "step": 41,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 0.4906,
+   "logp_gap_mean": 0.008959,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 951.6
+  },
+  {
+   "step": 42,
+   "reward": 0.625,
+   "reward_std": 0.4559,
+   "grad_norm": 1.616,
+   "logp_gap_mean": 0.01217,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 258.1
+  },
+  {
+   "step": 43,
+   "reward": 0.575,
+   "reward_std": 0.3991,
+   "grad_norm": 1.33,
+   "logp_gap_mean": 0.009689,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 386.0
+  },
+  {
+   "step": 44,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 1.025,
+   "logp_gap_mean": 0.01274,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 391.4
+  },
+  {
+   "step": 45,
+   "reward": 0.075,
+   "reward_std": 0.1389,
+   "grad_norm": 1.49,
+   "logp_gap_mean": 0.01313,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 421.0
+  },
+  {
+   "step": 46,
+   "reward": 0.0375,
+   "reward_std": 0.1061,
+   "grad_norm": 1.423,
+   "logp_gap_mean": 0.01962,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 413.1
+  },
+  {
+   "step": 47,
+   "reward": 0.075,
+   "reward_std": 0.1389,
+   "grad_norm": 1.888,
+   "logp_gap_mean": 0.02184,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 393.8
+  },
+  {
+   "step": 48,
+   "reward": 0.7125,
+   "reward_std": 0.4518,
+   "grad_norm": 1.75,
+   "logp_gap_mean": 0.006155,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 253.9
+  },
+  {
+   "step": 49,
+   "reward": 0.2375,
+   "reward_std": 0.342,
+   "grad_norm": 0.9385,
+   "logp_gap_mean": 0.01253,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 392.9
+  },
+  {
+   "step": 50,
+   "reward": 0.1125,
+   "reward_std": 0.1553,
+   "grad_norm": 1.284,
+   "logp_gap_mean": 0.01204,
+   "frac_reward_zero_std": 0.0,
+   "completion_mean_length": 419.8
+  }
+ ],
+ "note": "training-batch reward; each step samples different tasks, not an evaluation"
+}
