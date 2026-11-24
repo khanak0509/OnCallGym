@@ -149,6 +149,7 @@ Training runs on Kaggle (T4 x2) from `notebooks/train/` (`build.py` packs the co
 - No transfer to unseen fault families yet; gains are on families seen in training.
 - 17 families on one synthetic system. The services are small Python processes, not production software; realism comes from the failure modes, alerts and checks, not from scale.
 - The automated red team (local Qwen3-8B) was too weak to find exploits; the hack table comes mostly from human-style code review.
+- The verifier checks that the faulty value is corrected, not that the file is otherwise clean: a sloppy fix that also leaves a junk key behind (seen on catalog_bad_build_flag) still counts as fixed.
 
 ## Citation
 
