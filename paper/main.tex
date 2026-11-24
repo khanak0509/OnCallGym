@@ -78,14 +78,17 @@ SFT+GRPO (40 steps, easy) & held-out & 160 & 0.0\% & 0.024 & 0.08 \\
 SFT & easy train (16 tasks) & 256 & 19.9\% & 0.334 & 0.64 \\
 SFT+GRPO (40 steps, easy) & easy train & 256 & 20.7\% & 0.390 & 0.74 \\
 SFT+GRPO (all train tiers) & held-out / all train & \TBD & \TBD & \TBD & \TBD \\
-Qwen3 0.6B / 4B / 8B (no training) & held-out / all train & \TBD & \TBD & \TBD & \TBD \\
+Qwen3-0.6B (no training) & held-out / all train & 80 / 96 & 0 / 0\% & 0.038 / 0.000 & 0.13 / 0.00 \\
+Qwen3-1.7B (no training, rerun) & held-out / all train & 80 / 96 & 0 / 0\% & 0.038 / 0.000 & 0.13 / 0.00 \\
+Qwen3-4B (no training) & held-out / all train & 80 / 96 & 0 / 0\% & 0.094 / 0.047 & 0.31 / 0.16 \\
+Qwen3-8B (no training) & held-out / all train & 80 / 96 & 0 / 0\% & 0.008 / 0.000 & 0.03 / 0.00 \\
 \bottomrule
 \end{tabular}
-\caption{Qwen3-1.7B results. C: share of episodes with the right category and component.}
+\caption{Results. C: share of episodes with the right category and component. Untrained baselines come from one session with 4 samples per held-out task and 2 per task on all 48 training tasks.}
 \label{tab:results}
 \end{table}
 
-The base model never solves a fault and, on held-out faults, runs out of turns or context in 83\% of episodes. SFT teaches the protocol and lifts the easy-training solve rate to 19.9\%. GRPO on easy faults raised mean reward by $+0.056$ (task-level 95\% CI $[+0.013, +0.095]$, $p=0.02$), mostly through better diagnoses (C 0.64$\to$0.74), but we treat this as suggestive: the gain comes from two of four families (exact family-level $p=0.25$), the two arms were evaluated in different sessions, and an A/A comparison of identical weights showed $+0.044$ reward of pure noise. The strict solve rate did not change ($+0.008$, $p=0.88$). On the five held-out families, no model solves anything and rewards do not differ significantly (SFT$\to$GRPO $+0.000$; base$\to$SFT $-0.015$, $p=0.39$).
+The base model never solves a fault and, on held-out faults, runs out of turns or context in 83\% of episodes. SFT teaches the protocol and lifts the easy-training solve rate to 19.9\%. GRPO on easy faults raised mean reward by $+0.056$ (task-level 95\% CI $[+0.013, +0.095]$, $p=0.02$), mostly through better diagnoses (C 0.64$\to$0.74), but we treat this as suggestive: the gain comes from two of four families (exact family-level $p=0.25$), the two arms were evaluated in different sessions, and an A/A comparison of identical weights showed $+0.044$ reward of pure noise. The strict solve rate did not change ($+0.008$, $p=0.88$). Untrained Qwen3 models up to 8B solve nothing on either split, and size does not help monotonically: 0.6B submits after about five calls and blames the wrong service, 1.7B and 8B mostly run out of turns (80\% and 92\% of held-out episodes without a submission), and only 4B balances investigation and submission (diagnosis right on 31\% of held-out episodes, still no fix). On the five held-out families, no model solves anything and rewards do not differ significantly (SFT$\to$GRPO $+0.000$; base$\to$SFT $-0.015$, $p=0.39$).
 
 \section{Analysis}
 \begin{figure}[t]

@@ -71,13 +71,22 @@ Qwen3-1.7B, thinking off, 8k context, LoRA r=16. Same evaluator and sampling (T=
 | SFT + GRPO (40 steps, easy train) | held-out test | 160 | 0.0% | 0/20 | 0.024 | 0.08 |
 | SFT | easy train tasks (16) | 256 | 19.9% | 12/16 | 0.334 | 0.64 |
 | SFT + GRPO (40 steps, easy train) | easy train tasks | 256 | 20.7% | 15/16 | 0.390 | 0.74 |
-| SFT + GRPO (60 steps, all train tiers) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
+| SFT + GRPO (all train tiers) | held-out test / all train | TBD | TBD | TBD | TBD | TBD |
 
 - The base model solves nothing anywhere. Scripted-oracle SFT gets it to ~20% on the easy training families.
 - GRPO on easy training tasks raised mean reward by +0.056 through better diagnoses (bootstrap over tasks: 95% CI [+0.013, +0.095], p=0.02). Treat this as suggestive only: the 16 tasks are 4 families whose variants share most of their prompt, the gain comes from 2 of the 4 families (exact family-level sign-flip p=0.25), and the SFT row was evaluated in a different Kaggle session. The strict solve rate did not move (+0.008, p=0.88).
 - Nothing transfers to the five held-out families: all three models solve 0/160 and their rewards are not significantly different. The trained models learned the protocol (they submit instead of running out of turns: base runs out on 83% of episodes, SFT/GRPO on 2-4%) but blame the wrong service on 56-68% of unseen faults.
 
-Baselines (open models, no training, same settings): TBD (Qwen3-0.6B / 1.7B / 4B / 8B, running).
+Untrained open models, same evaluator and sampler (one Kaggle session, `results/baseline_*`; 4 samples per test task, 2 per train task over all 48 train tasks):
+
+| model | held-out test: solved / reward / C | all train tiers: solved / reward / C | no submission (test) | tool calls per episode (test) |
+|---|---|---|---|---|
+| Qwen3-0.6B | 0/80 · 0.038 · 0.13 | 0/96 · 0.000 · 0.00 | 0% | 4.9 |
+| Qwen3-1.7B | 0/80 · 0.038 · 0.13 | 0/96 · 0.000 · 0.00 | 80% | 13.0 |
+| Qwen3-4B | 0/80 · 0.094 · 0.31 | 0/96 · 0.047 · 0.16 | 22% | 9.8 |
+| Qwen3-8B | 0/80 · 0.008 · 0.03 | 0/96 · 0.000 · 0.00 | 92% | 13.9 |
+
+No untrained model up to 8B solves a single episode, and size does not help monotonically: 0.6B submits a guess after ~5 calls and is almost always wrong, while 1.7B and 8B keep investigating until the turn limit and rarely submit (38% of 1.7B's and 15% of 8B's tool calls on test exactly repeat an earlier call in the same episode). 4B is the only one that balances the two, and it gets the right diagnosis on 31% of held-out episodes, but it never fixes anything.
 
 ### Where episodes fail
 
