@@ -43,7 +43,12 @@ def main():
     ap.add_argument(
         "--is-mode", default=None, help="vllm_importance_sampling_mode (TRL default if unset)"
     )
-    ap.add_argument("--max-logp-gap", type=float, default=0.4)
+    # same sampler as oncallgym.evaluate (T 0.7 is passed by the kernel, top_p/top_k here)
+    ap.add_argument("--top-p", type=float, default=0.95)
+    ap.add_argument("--top-k", type=int, default=20)
+    # with the race-free sync the measured gap is 0.003-0.02 (top_k/top_p renormalization in
+    # vLLM's logprobs adds a little); the racy sync gave 0.13 at step 1 and ~0.8 later
+    ap.add_argument("--max-logp-gap", type=float, default=0.1)
     ap.add_argument(
         "--debug-dump", type=int, default=0, help="dump tokens+logprobs of first N calls"
     )
@@ -66,7 +71,6 @@ def main():
     log_path = os.path.join(a.out, "train_log.jsonl")
     forward_lengths: list[int] = []
     grad_norms: list[float] = []
-    gaps: list[float] = []
 
     class Logger(TrainerCallback):
         def on_step_begin(self, args, state, control, **kw):
@@ -96,12 +100,10 @@ def main():
             if len(grad_norms) >= 3 and not any(grad_norms):
                 print("grad_norm is 0 on the first 3 steps, stopping", flush=True)
                 control.should_training_stop = True
-            # vLLM must sample from the trainer's weights: same weights give ~0.15 nats/token
+            # vLLM must sample from the trainer's weights (see training/vllm_sync.py)
             gap = rec.get("sampling/sampling_logp_difference/mean")
-            if gap is not None:
-                gaps.append(gap)
-            if len(gaps) >= 2 and min(gaps[-2:]) > a.max_logp_gap:
-                print(f"trainer/vLLM logprob gap {gaps[-2:]} too high, stopping", flush=True)
+            if gap is not None and gap > a.max_logp_gap:
+                print(f"trainer/vLLM logprob gap {gap} > {a.max_logp_gap}, stopping", flush=True)
                 control.should_training_stop = True
 
         def on_step_end(self, args, state, control, **kw):
@@ -140,6 +142,8 @@ def main():
         save_strategy="no",
         seed=0,
         temperature=a.temperature,
+        top_p=a.top_p,
+        top_k=a.top_k,
         cast_lm_head_to_fp32=a.lm_head_fp32,
         **({"vllm_importance_sampling_mode": a.is_mode} if a.is_mode else {}),
     )

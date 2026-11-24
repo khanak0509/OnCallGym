@@ -32,14 +32,40 @@ def save():
 
 
 def sh(cmd, log, timeout=7200, env=None):
+    """Run cmd in its own process group; on timeout kill the whole group (trainer,
+    evaluator and the episode stacks they started), then re-raise TimeoutExpired."""
     t0 = time.time()
     with open(WORK / log, "w") as f:
-        p = subprocess.run(
-            cmd, shell=True, stdout=f, stderr=subprocess.STDOUT, timeout=timeout, cwd=SRC, env=env
+        p = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=f,
+            stderr=subprocess.STDOUT,
+            cwd=SRC,
+            env=env,
+            start_new_session=True,
         )
+        try:
+            p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stop_group(p)
+            raise
     tail = (WORK / log).read_text(errors="replace")[-2500:]
     print(f"$ {cmd[:200]} -> {p.returncode} ({time.time() - t0:.0f}s)\n{tail[-600:]}", flush=True)
     return p.returncode, round(time.time() - t0)
+
+
+def stop_group(proc):
+    for sig in (15, 9):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=60)
+            return
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def wait_up(port, proc, tries=240):
@@ -97,6 +123,8 @@ def serve_and_eval(model, adapters, evals, py, env, prefix, tp=1, base=True):
     )
     out = {"up": wait_up(8100, proc, tries=480)}
     if not out["up"]:
+        stop_group(proc)
+        time.sleep(10)
         return out
     names = list(adapters) + ([model] if base else [])
     for ev in evals:
@@ -122,11 +150,7 @@ def serve_and_eval(model, adapters, evals, py, env, prefix, tp=1, base=True):
                 out[key] = {"rc": rc}
             summary["stages"][f"{prefix}_partial"] = out
             save()
-    os.killpg(proc.pid, 15)
-    try:
-        proc.wait(timeout=120)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, 9)
+    stop_group(proc)
     time.sleep(10)
     return out
 
@@ -137,7 +161,8 @@ def run_gate(s, gate, py, env, adapters, prefix="gate"):
     "evals": a list of them."""
     evals = gate.get("evals") or [gate]
     out = serve_and_eval(s["model"], adapters, evals, py, env, prefix, base=gate.get("base", True))
-    rate = out.get("sft", {}).get("solve_rate", 0.0)
+    first = evals[0].get("name")
+    rate = out.get(f"{first}_sft" if first else "sft", {}).get("solve_rate", 0.0)
     lo, hi = gate.get("band", [0.10, 0.40])
     out["go"] = bool(lo <= rate <= hi) or bool(gate.get("force"))
     return out
@@ -273,16 +298,13 @@ def main():
             rc, secs = "timeout", round(time.time() - t0)
         summary["stages"][run["name"]] = {"rc": rc, "s": secs, "args": run["args"]}
         save()
-    os.killpg(vllm.pid, 15)
-    try:
-        vllm.wait(timeout=120)
-    except subprocess.TimeoutExpired:
-        os.killpg(vllm.pid, 9)
+    stop_group(vllm)
     time.sleep(10)
     save()
     post = s.get("post_eval")
     grpo_adapter = latest_adapter(f"{WORK}/{runs[-1]['name']}")
-    summary["grpo_adapter"] = grpo_adapter
+    # label what is evaluated: the final adapter only if GRPO finished (rc 0)
+    summary["grpo_adapter"] = {"path": grpo_adapter, "grpo_rc": rc}
     if post and grpo_adapter:
         adapters = {"grpo": grpo_adapter}
         if s.get("sft", True) and post.get("sft", True):

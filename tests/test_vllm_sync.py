@@ -62,3 +62,34 @@ def test_unmerges_when_consumer_stops_early():
     assert model.base_model.model.q_proj.merged
     g.close()
     assert not model.base_model.model.q_proj.merged
+
+
+def test_trl_sync_weights_uses_the_patched_iterator():
+    vg, model = make_vg()
+    base = model.base_model.model.q_proj.base_layer.weight.detach().clone()
+    sent = {}
+
+    class Client:
+        def update_named_params(self, metadata, params):
+            sent.update({n: t.clone() for n, t in params})
+
+        def reset_prefix_cache(self):
+            sent["_reset"] = True
+
+    class Acc:
+        is_main_process = True
+
+    vg.mode, vg.enable_sleep_mode, vg.accelerator = "server", False, Acc()
+    vg._weight_metadata, vg.vllm_client = None, Client()
+    calls = []
+    safe = make_safe_peft_iter(vg)
+
+    def spy():
+        calls.append(1)
+        yield from safe()
+
+    vg._iter_named_params = spy
+    vg.sync_weights()
+    assert calls and sent.get("_reset")
+    assert not torch.allclose(sent["q_proj.weight"], base)  # merged weights went out
+    assert not model.base_model.model.q_proj.merged

@@ -4,9 +4,16 @@
 
 Per task: solve rate and mean reward of A and B. Overall difference with a bootstrap CI over
 tasks (tasks are the unit, samples within a task are correlated) and a sign-flip permutation
-p-value on the per-task differences.
+p-value on the per-task differences. Variants of one family share most of their prompt and
+fix, so tasks are not independent either: the family-level line averages the differences per
+family and runs an exact sign-flip test over families (with 4 families the smallest possible
+p is 0.125, so it can only ever be "not significant" or borderline).
+
+Refuses a run without meta.json (a timed-out or partial eval) and warns when tasks have
+different episode counts in A and B.
 """
 
+import itertools
 import json
 import random
 import re
@@ -16,6 +23,8 @@ from pathlib import Path
 
 
 def load(d):
+    if not Path(d, "meta.json").exists():
+        sys.exit(f"{d}: no meta.json (partial or failed eval), refusing to compare")
     by_task = defaultdict(list)
     for f in sorted(Path(d, "trajectories").glob("*.json")):
         task = re.sub(r"-\d+$", "", f.stem)
@@ -39,12 +48,27 @@ def stats(diffs, iters=10000, seed=0):
     return mean, ci, hits / iters
 
 
+def family_stats(diffs_by_task):
+    fam = defaultdict(list)
+    for t, d in diffs_by_task.items():
+        fam[t.rsplit("_", 1)[0]].append(d)
+    means = [sum(v) / len(v) for v in fam.values()]
+    m = sum(means) / len(means)
+    signs = list(itertools.product([1, -1], repeat=len(means)))
+    flipped = [sum(s * x for s, x in zip(sg, means, strict=True)) / len(means) for sg in signs]
+    hits = sum(abs(f) >= abs(m) - 1e-12 for f in flipped)
+    return m, len(means), hits / len(signs), {f: round(sum(v) / len(v), 4) for f, v in fam.items()}
+
+
 def main(a, b):
     A, B = load(a), load(b)
     tasks = sorted(set(A) & set(B))
     head = ["nA", "nB", "solveA", "solveB", "rewA", "rewB"]
     print(f"{'task':40s} " + " ".join(f"{h:>7s}" for h in head))
     ds, dr = [], []
+    uneven = [t for t in tasks if len(A[t]) != len(B[t])]
+    if uneven:
+        print(f"WARNING: {len(uneven)} tasks have different episode counts: {uneven[:5]}")
     for t in tasks:
         sa = sum(x for x, _ in A[t]) / len(A[t])
         sb = sum(x for x, _ in B[t]) / len(B[t])
@@ -64,6 +88,8 @@ def main(a, b):
             f"B - A {name}: {m:+.4f}  95% CI over tasks [{ci[0]:+.4f}, {ci[1]:+.4f}]  "
             f"sign-flip p={p:.4f}"
         )
+        fm, nf, fp, per = family_stats(dict(zip(tasks, d, strict=True)))
+        print(f"   by family ({nf}): {fm:+.4f}  exact sign-flip p={fp:.4f}  {per}")
 
 
 if __name__ == "__main__":

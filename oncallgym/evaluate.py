@@ -30,7 +30,7 @@ def _post(url, body, timeout=600):
         return json.loads(r.read())
 
 
-def make_generate(base_url, backend, model, tokenizer, temperature, top_p, workers=8):
+def make_generate(base_url, backend, model, tokenizer, temperature, top_p, top_k=20, workers=8):
     eos = tokenizer.convert_tokens_to_ids("<|im_end|>")
 
     def one(ids, max_new):
@@ -43,6 +43,7 @@ def make_generate(base_url, backend, model, tokenizer, temperature, top_p, worke
                     "max_tokens": max_new,
                     "temperature": temperature,
                     "top_p": top_p,
+                    "top_k": top_k,
                     "skip_special_tokens": False,
                 },
             )
@@ -55,6 +56,7 @@ def make_generate(base_url, backend, model, tokenizer, temperature, top_p, worke
                     "n_predict": max_new,
                     "temperature": temperature,
                     "top_p": top_p,
+                    "top_k": top_k,
                     "cache_prompt": True,
                 },
             )
@@ -82,6 +84,8 @@ def main(argv=None):
     ap.add_argument("--samples", type=int, default=1, help="episodes per task (pass@k)")
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--top-p", type=float, default=0.95)
+    # 20 = Qwen3's generation_config default, which vLLM applied implicitly before this flag
+    ap.add_argument("--top-k", type=int, default=20)
     ap.add_argument("--parallel", type=int, default=6)
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -100,7 +104,7 @@ def main(argv=None):
         if v >= lo and make_fault(f, v).tier in tiers
         for _ in range(a.samples)
     ]
-    gen = make_generate(a.base_url, a.backend, a.model, tok, a.temperature, a.top_p)
+    gen = make_generate(a.base_url, a.backend, a.model, tok, a.temperature, a.top_p, a.top_k)
     traj_dir = os.path.join(a.out, "trajectories")
     os.makedirs(traj_dir, mode=0o700, exist_ok=True)
     t0 = time.time()
@@ -127,6 +131,7 @@ def main(argv=None):
         "samples": a.samples,
         "temperature": a.temperature,
         "top_p": a.top_p,
+        "top_k": a.top_k,
         "fingerprint": fingerprint(),
         "seconds": round(time.time() - t0),
         "episodes": len(results),

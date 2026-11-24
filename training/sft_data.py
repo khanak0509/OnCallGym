@@ -55,18 +55,22 @@ OPENERS = [
         ],
     ),
 ]
-HERRING_SERVICES = ["scheduler", "inventory", "auth", "catalog", "broker", "payments"]
+# Red herrings and wrong guesses teach "this looked fine, it was not the cause". They only
+# use services that are never a held-out (test split) root cause, so the data does not teach
+# the model to dismiss auth, cache, payments, ... (checked in tests/test_sft_data.py), and
+# never the current episode's own root-cause service.
+HERRING_SERVICES = ["scheduler", "inventory", "catalog", "flags"]
 HERRING_THOUGHTS = [
     "Those warnings look like routine noise, not the incident. Moving on.",
     "Nothing there explains the symptom; that is normal background logging.",
     "Harmless warnings only. The cause is elsewhere.",
 ]
-WRONG_GUESSES = [
-    "cat etc/scheduler.yaml",
-    "cat etc/cache.yaml",
-    "cat etc/env/payments.env",
-    "grep -n timeout_ms etc/edge.yaml",
-]
+WRONG_GUESSES = {
+    "scheduler": "cat etc/scheduler.yaml",
+    "inventory": "cat etc/inventory.yaml",
+    "edge": "grep -n timeout_ms etc/edge.yaml",
+    "flags": "cat etc/env/flags.env",
+}
 WRONG_THOUGHTS = [
     "Let me rule out a config problem here first.",
     "Maybe this config is involved; check it.",
@@ -85,7 +89,7 @@ def is_mutating(step):
     return any(w in cmd for w in ("sed -i", "-X POST", ">>", " > "))
 
 
-def vary(steps, rng):
+def vary(steps, rng, component):
     """Scripted variations around a family's solution_steps."""
     steps = list(steps)
     first_mut = next((i for i, s in enumerate(steps) if is_mutating(s)), len(steps))
@@ -97,13 +101,14 @@ def vary(steps, rng):
     for tool, args, thoughts in rng.sample(OPENERS, rng.randint(0, 2)):
         extra.append((tool, args, rng.choice(thoughts)))
     if rng.random() < 0.35:
-        svc = rng.choice(HERRING_SERVICES)
+        svc = rng.choice([x for x in HERRING_SERVICES if x != component])
         extra.append(
             ("logs", {"service": svc, "tail": 5, "grep": "warn"}, f"Check {svc} for warnings too.")
         )
         extra.append(("__note__", {}, rng.choice(HERRING_THOUGHTS)))
     if rng.random() < 0.3:
-        extra.append(("exec", {"command": rng.choice(WRONG_GUESSES)}, rng.choice(WRONG_THOUGHTS)))
+        cmd = rng.choice([c for svc, c in WRONG_GUESSES.items() if svc != component])
+        extra.append(("exec", {"command": cmd}, rng.choice(WRONG_THOUGHTS)))
         extra.append(("__note__", {}, rng.choice(CORRECTIONS)))
     return extra + investigate + rest
 
@@ -121,7 +126,7 @@ def play(family, variant, aug, renderer, eos_ids):
         loop.start()
         steps = ep.fault.solution_steps(ep.stack)
         if aug > 0:
-            steps = vary(steps, rng)
+            steps = vary(steps, rng, ep.fault.ground_truth.component)
         input_ids = list(renderer.prompt_ids(loop.messages))
         mask = [0] * len(input_ids)
         pending_note = None
