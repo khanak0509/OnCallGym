@@ -37,9 +37,10 @@ for k, v in {
     assert src.count(f"{k} = None") == 1, k
     src = src.replace(f"{k} = None", f"{k} = {v!r}")
 (dest / "train_kernel.py").write_text(src)
+slug = settings.get("kernel", "oncallgym-train")
 meta = {
-    "id": f"{user}/oncallgym-train",
-    "title": "oncallgym-train",
+    "id": f"{user}/{slug}",
+    "title": slug,
     "code_file": "train_kernel.py",
     "language": "python",
     "kernel_type": "script",

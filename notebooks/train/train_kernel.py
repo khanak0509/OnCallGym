@@ -65,15 +65,15 @@ def find_adapter(path):
     return str(found[0]) if found else path
 
 
-def run_gate(s, gate, py, env, adapters, prefix="gate"):
-    """pass@k of LoRA adapters (and optionally the base model) with the shared-loop
-    evaluator. As the gate, GRPO only starts if the SFT solve rate is within the band;
-    after GRPO the same settings give the before/after comparison."""
+def serve_and_eval(model, adapters, evals, py, env, prefix, tp=1, base=True):
+    """Serve `model` with vLLM (optionally with LoRA adapters) and run the shared-loop
+    evaluator for every eval config on every adapter (and the base model if `base`).
+    Results land in WORK/{prefix}_{eval name}_{tag}; returns their meta.json contents."""
     log = open(WORK / f"vllm_{prefix}.log", "w")
     cmd = [
         f"{VENV}/bin/vllm",
         "serve",
-        s["model"],
+        model,
         "--port",
         "8100",
         "--dtype",
@@ -82,44 +82,84 @@ def run_gate(s, gate, py, env, adapters, prefix="gate"):
         "8192",
         "--gpu-memory-utilization",
         "0.85",
-        "--enable-lora",
-        "--max-lora-rank",
-        "16",
-        "--lora-modules",
-        *[f"{k}={v}" for k, v in adapters.items()],
+        "--tensor-parallel-size",
+        str(tp),
     ]
+    if adapters:
+        cmd += ["--enable-lora", "--max-lora-rank", "16", "--lora-modules"]
+        cmd += [f"{k}={v}" for k, v in adapters.items()]
     proc = subprocess.Popen(
         cmd,
         stdout=log,
         stderr=subprocess.STDOUT,
         start_new_session=True,
-        env={**env, "CUDA_VISIBLE_DEVICES": "1"},
+        env={**env, "CUDA_VISIBLE_DEVICES": "0,1" if tp == 2 else "1"},
     )
-    out = {"up": wait_up(8100, proc)}
+    out = {"up": wait_up(8100, proc, tries=480)}
     if not out["up"]:
         return out
-    names = list(adapters) + ([s["model"]] if gate.get("base", True) else [])
-    for name in names:
-        tag = name if name in adapters else "base"
-        rc, secs = sh(
-            f"{py} -m oncallgym.evaluate --base-url http://127.0.0.1:8100 "
-            f"--backend vllm --model {name} --tokenizer {s['model']} "
-            f"--split {gate.get('split', 'train')} --tiers {gate.get('tiers', 'easy')} "
-            f"--variants {gate.get('variants', '0-3')} --samples {gate.get('samples', 8)} "
-            f"--parallel 8 --out {WORK}/{prefix}_{tag}",
-            f"{prefix}_{tag}.log",
-            env={**env, "PYTHONPATH": str(SRC)},
-        )
-        try:
-            out[tag] = json.loads((WORK / f"{prefix}_{tag}" / "meta.json").read_text())
-        except OSError:
-            out[tag] = {"rc": rc}
-    proc.terminate()
-    proc.wait(timeout=120)
+    names = list(adapters) + ([model] if base else [])
+    for ev in evals:
+        for name in names:
+            tag = name if name in adapters else "base"
+            key = f"{ev['name']}_{tag}" if ev.get("name") else tag
+            try:
+                rc, secs = sh(
+                    f"{py} -m oncallgym.evaluate --base-url http://127.0.0.1:8100 "
+                    f"--backend vllm --model {name} --tokenizer {model} "
+                    f"--split {ev.get('split', 'train')} --tiers {ev.get('tiers', 'easy')} "
+                    f"--variants {ev.get('variants', '0-3')} --samples {ev.get('samples', 8)} "
+                    f"--parallel {ev.get('parallel', 8)} --out {WORK}/{prefix}_{key}",
+                    f"{prefix}_{key}.log",
+                    timeout=ev.get("timeout_s", 14400),
+                    env={**env, "PYTHONPATH": str(SRC)},
+                )
+            except subprocess.TimeoutExpired:
+                rc = "timeout"
+            try:
+                out[key] = json.loads((WORK / f"{prefix}_{key}" / "meta.json").read_text())
+            except OSError:
+                out[key] = {"rc": rc}
+            summary["stages"][f"{prefix}_partial"] = out
+            save()
+    os.killpg(proc.pid, 15)
+    try:
+        proc.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, 9)
+    time.sleep(10)
+    return out
+
+
+def run_gate(s, gate, py, env, adapters, prefix="gate"):
+    """As the gate, GRPO only starts if the SFT solve rate is within the band; after GRPO
+    the same helper gives the before/after comparison. `gate` is one eval config, or has
+    "evals": a list of them."""
+    evals = gate.get("evals") or [gate]
+    out = serve_and_eval(s["model"], adapters, evals, py, env, prefix, base=gate.get("base", True))
     rate = out.get("sft", {}).get("solve_rate", 0.0)
     lo, hi = gate.get("band", [0.10, 0.40])
     out["go"] = bool(lo <= rate <= hi) or bool(gate.get("force"))
     return out
+
+
+def run_baselines(bl, py, env):
+    """Open models of several sizes, no adapters, same evaluator and settings."""
+    res = {}
+    for m in bl["models"]:
+        tag = m["model"].split("/")[-1].lower()
+        res[tag] = serve_and_eval(m["model"], {}, bl["evals"], py, env, f"bl_{tag}", m.get("tp", 1))
+        summary["stages"]["baselines"] = res
+        save()
+    return res
+
+
+def latest_adapter(run_dir):
+    final = Path(run_dir, "adapter")
+    if Path(final, "adapter_config.json").exists():
+        return str(final)
+    ckpts = sorted(Path(run_dir).glob("checkpoint-*"), key=lambda p: int(p.name.split("-")[1]))
+    return str(ckpts[-1]) if ckpts else None
 
 
 def main():
@@ -153,6 +193,9 @@ def main():
     if s.get("sft_adapter"):
         sft_adapter = find_adapter(sft_adapter)
     summary["sft_adapter"] = sft_adapter
+    if s.get("baselines"):
+        run_baselines(s["baselines"], py, env)
+        return
     ev = s.get("eval")
     if ev:
         adapters = {k: find_adapter(v) for k, v in ev.get("adapters", {}).items()}
@@ -216,22 +259,32 @@ def main():
     adapter = f"--adapter {sft_adapter}" if s.get("sft", True) else ""
     runs = s.get("grpo_runs") or [{"name": "grpo", "args": ""}]
     for run in runs:
-        rc, secs = sh(
-            f"{py} training/grpo.py --out {WORK}/{run['name']} --model {s['model']} {adapter} "
-            f"--steps {s['grpo_steps']} --variants {s.get('variants', 8)} "
-            f"--tiers {s.get('tiers', 'easy,medium,hard')} {run['args']}",
-            f"{run['name']}.log",
-            timeout=s.get("grpo_timeout_s", 30000),
-            env=gpu0,
-        )
+        t0 = time.time()
+        try:
+            rc, secs = sh(
+                f"{py} training/grpo.py --out {WORK}/{run['name']} --model {s['model']} "
+                f"{adapter} --steps {s['grpo_steps']} --variants {s.get('variants', 8)} "
+                f"--tiers {s.get('tiers', 'easy,medium,hard')} {run['args']}",
+                f"{run['name']}.log",
+                timeout=s.get("grpo_timeout_s", 30000),
+                env=gpu0,
+            )
+        except subprocess.TimeoutExpired:
+            rc, secs = "timeout", round(time.time() - t0)
         summary["stages"][run["name"]] = {"rc": rc, "s": secs, "args": run["args"]}
         save()
-    vllm.terminate()
-    vllm.wait(timeout=120)
+    os.killpg(vllm.pid, 15)
+    try:
+        vllm.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        os.killpg(vllm.pid, 9)
+    time.sleep(10)
     save()
     post = s.get("post_eval")
-    if post and rc == 0:
-        adapters = {"grpo": f"{WORK}/{runs[-1]['name']}/adapter"}
+    grpo_adapter = latest_adapter(f"{WORK}/{runs[-1]['name']}")
+    summary["grpo_adapter"] = grpo_adapter
+    if post and grpo_adapter:
+        adapters = {"grpo": grpo_adapter}
         if s.get("sft", True) and post.get("sft", True):
             adapters = {"sft": sft_adapter, **adapters}
         summary["stages"]["post_eval"] = run_gate(s, post, py, env, adapters, prefix="post")
